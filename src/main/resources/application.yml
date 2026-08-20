@@ -3,6 +3,10 @@ spring:
     import: "optional:file:.env[.properties]"
   application:
     name: reader
+
+  mongodb:
+    uri: ${MONGODB_URI:}
+
   data:
     mongodb:
       auto-index-creation: true
@@ -64,8 +68,6 @@ tnf:
     jwt:
       secret: ${TNF_JWT_SECRET}
       ttl: 1h
-  mongodb:
-    uri: ${MONGODB_URI:}
 
 tf:
   security:
@@ -78,7 +80,6 @@ tf:
       # Twelve hours: one working day needs one sign in. This is the absolute session
       # lifetime too, since rotation never extends it.
       refresh-token-ttl: 12h
-
 # API documentation is off by default and enabled only by the dev profile.
 springdoc:
   api-docs:
