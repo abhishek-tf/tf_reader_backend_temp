@@ -1,3 +1,6 @@
+server:
+  port: 8080
+
 spring:
   config:
     import: "optional:file:.env[.properties]"
@@ -5,86 +8,53 @@ spring:
     name: reader
   data:
     mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/tnfreader}
       auto-index-creation: true
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 200ms
 
   security:
     saml2:
       relyingparty:
         registration:
           tf-reader:
-            # --- our side (the Service Provider) ---
-            # Audience the IdP must address the assertion to. Must match the aud= below.
             entity-id: tf-reader-sp
             acs:
-              # Where the IdP POSTs the SAMLResponse. Must match the acs_url= below.
               location: "{baseUrl}/login/saml2/sso/{registrationId}"
-
-            # --- the IdP side (the Asserting Party) ---
             assertingparty:
-              # The Issuer value samlmock.dev puts in the response. It defaults to
-              # "saml-mock" in their UI; leave that field alone or this will not match.
               entity-id: saml-mock
               singlesignon:
-                # The SSO endpoint. The aud and acs_url query parameters pre-fill the mock
-                # IdP's form so a human does not have to retype them; Spring appends
-                # SAMLRequest and RelayState to this URL. Changing the port means changing
-                # acs_url here too.
-                url: "https://samlmock.dev/idp?aud=tf-reader-sp&acs_url=http%3A%2F%2Flocalhost%3A8080%2Flogin%2Fsaml2%2Fsso%2Ftf-reader"
+                url: ${SAML_URL:https://samlmock.dev/idp?aud=tf-reader-sp&acs_url=http%3A%2F%2Flocalhost%3A8080%2Flogin%2Fsaml2%2Fsso%2Ftf-reader}
                 binding: redirect
-                # We do not sign the AuthnRequest. Spring defaults this to true, which would
-                # demand an SP private key committed to the repository - and samlmock.dev never
-                # verifies AuthnRequest signatures (there is no verification code in its request
-                # parser), so it would buy nothing. This does NOT affect validation of the
-                # response, which stays fully enabled below.
                 sign-request: false
               verification:
-                # SIGNATURE VERIFICATION. The IdP's public certificate, downloaded from
-                # https://samlmock.dev/api/downloadCert - static, self-signed CN=thameera.com,
-                # valid until 2044-06-08. Every assertion is verified against it. Remove this
-                # and the application refuses to start rather than trusting unsigned assertions.
                 credentials:
                   - certificate-location: classpath:saml/samlmock-idp.crt
 
-# =============================================================================
-#  JWT signing
-# =============================================================================
-#  HS256, one secret, one hour - the PRD's whole token design.
-#
-#  There is NO DEFAULT SECRET, on purpose. The placeholder below has no fallback
-#  value, so the application fails to start unless TNF_JWT_SECRET is set in the
-#  environment. A default would mean every forgetful deployment shared a publicly
-#  known signing key, and anything that can verify an HS256 token can mint one.
-#
-#  Generate one:  openssl rand -base64 48
-# -----------------------------------------------------------------------------
-tnf:
+tf:
   catalogue:
-    base-url: http://localhost:8080
+    base-url: ${BASE_URL:http://localhost:8080}
+  security:
+    jwt:
+      issuer: tf-reader
+      secret: ${TF_JWT_SECRET}
+      access-token-ttl: 15m
+      refresh-token-ttl: 12h
+
+tnf:
   auth:
     jwt:
       secret: ${TNF_JWT_SECRET}
       ttl: 1h
-  mongodb:
-    uri: ${MONGODB_URI:}
 
-tf:
-  security:
-    jwt:
-      issuer: tf-reader
-      # No default. Startup fails fast when this is missing or shorter than 32 bytes.
-      # Supply it via the TF_JWT_SECRET environment variable in every deployed environment.
-      secret: ${TF_JWT_SECRET}
-      access-token-ttl: 15m
-      # Twelve hours: one working day needs one sign in. This is the absolute session
-      # lifetime too, since rotation never extends it.
-      refresh-token-ttl: 12h
-
-# API documentation is off by default and enabled only by the dev profile.
 springdoc:
   api-docs:
     enabled: false
   swagger-ui:
     enabled: false
+
 management:
   health:
     redis:

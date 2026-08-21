@@ -28,4 +28,6 @@ public interface CatalogueItemRepository extends MongoRepository<CatalogueItem, 
 
 	long countByPublisherId(String publisherId);
 
+	long countByCollectionIds(String collectionId);
+
 }

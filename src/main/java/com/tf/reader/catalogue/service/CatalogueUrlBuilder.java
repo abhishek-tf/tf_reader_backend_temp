@@ -9,7 +9,7 @@ public class CatalogueUrlBuilder {
 
     private final String baseUrl;
 
-    public CatalogueUrlBuilder(@Value("${tnf.catalogue.base-url:http://localhost:8080}") String baseUrl) {
+    public CatalogueUrlBuilder(@Value("${tf.catalogue.base-url}") String baseUrl) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
     }
 

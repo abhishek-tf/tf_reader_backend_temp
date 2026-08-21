@@ -58,7 +58,8 @@ class InstitutionApiIT {
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("spring.mongodb.uri", MONGO::getReplicaSetUrl);
         registry.add("tnf.seed.enabled", () -> "true");
-        registry.add("tnf.catalogue.base-url", () -> "http://localhost:8080");
+        // tf.catalogue.base-url comes from the test-wide default in application.properties -
+        // see the comment there for why it's fixed rather than tied to the random test port.
     }
 
     @Autowired TestRestTemplate http;
