@@ -1,21 +1,13 @@
-server:
-  port: 8080
-
 spring:
   config:
     import: "optional:file:.env[.properties]"
   application:
     name: reader
-  profiles:
-    active: local
+  mongodb:
+    uri: ${MONGODB_URI}
   data:
     mongodb:
-      uri: ${MONGODB_URI}
       auto-index-creation: true
-    redis:
-      host: localhost
-      port: 6379
-      timeout: 200ms
 
   security:
     saml2:
@@ -25,6 +17,8 @@ spring:
             entity-id: tf-reader-sp
             acs:
               location: "{baseUrl}/login/saml2/sso/{registrationId}"
+
+            # --- the IdP side (the Asserting Party) ---
             assertingparty:
               entity-id: saml-mock
               singlesignon:
@@ -37,67 +31,29 @@ spring:
 
 tf:
   catalogue:
+    # Base URL used to build absolute OPDS links. Renamed from tnf.catalogue.base-url;
+    # see CatalogueUrlBuilder.
     base-url: ${BASE_URL}
+
   security:
     jwt:
       issuer: tf-reader
       secret: ${TF_JWT_SECRET}
       access-token-ttl: 15m
       refresh-token-ttl: 12h
-
 tnf:
-  seed:
-    enabled: true
   auth:
     jwt:
       secret: ${TNF_JWT_SECRET}
       ttl: 1h
-    oidc:
-      client-id: ${OIDC_CLIENT_ID:mock-client-id}
-      client-secret: ${OIDC_CLIENT_SECRET:mock-client-secret}
-      issuer: ${OIDC_ISSUER:http://localhost:8080}
-      authorization-uri: ${OIDC_AUTHORIZATION_URI:http://localhost:8080/oauth2/v2.0/authorize}
-      token-uri: ${OIDC_TOKEN_URI:http://localhost:8080/oauth2/v2.0/token}
-      jwk-set-uri: ${OIDC_JWK_SET_URI:http://localhost:8080/oauth2/v2.0/jwks}
-      redirect-uri: ${OIDC_REDIRECT_URI:http://localhost:8080/api/v1/auth/oidc/callback}
 
+# API documentation is off by default and enabled only by the dev profile.
 springdoc:
   api-docs:
     enabled: false
   swagger-ui:
     enabled: false
-
 management:
   health:
     redis:
       enabled: false
-
-
-mock-oidc:
-  enabled: false
-  
----
-spring:
-  config:
-    activate:
-      on-profile: b2c
-
-# Belt and braces: the mock is already false by default, and stating it here
-# means "b2c" switches it off even if the profile list also carries "local".
-mock-oidc:
-  enabled: false
-
-tnf:
-  auth:
-    oidc:
-      client-id: ${OIDC_CLIENT_ID}
-      client-secret: ${OIDC_CLIENT_SECRET}
-      # The "issuer" field of the metadata document. NOT the discovery url.
-      issuer: ${OIDC_ISSUER}
-      authorization-uri: ${OIDC_AUTHORIZATION_URI}
-      token-uri: ${OIDC_TOKEN_URI}
-      # SIGNATURE VERIFICATION. Every ID token is verified against the keys
-      # published here. Point this anywhere else and sign-in stops working
-      # rather than trusting an unverified token.
-      jwk-set-uri: ${OIDC_JWK_SET_URI}
-      redirect-uri: ${OIDC_REDIRECT_URI:http://localhost:8080/api/v1/auth/oidc/callback}

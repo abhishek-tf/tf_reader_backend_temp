@@ -121,9 +121,10 @@ public class ReadBrokerService {
 
 			// ── Step 8: Extend claim to loan due date ──
 			if (copyLimited && !lease.extend(held, licence.expiresAt())) {
-				reconciler.reconcile(request.itemId());
+				if (!lease.extend(held, licence.expiresAt())) {
+					reconciler.reconcile(request.itemId());
+				}
 			}
-
 
 			// ── Step 9: Forward payload unchanged ──
 			Instant now = clock.instant();

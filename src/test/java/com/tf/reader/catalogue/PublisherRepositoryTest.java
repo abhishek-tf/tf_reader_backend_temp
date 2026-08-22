@@ -7,17 +7,19 @@ import java.time.Instant;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.DuplicateKeyException;
 
-import com.tf.reader.ContainerisedInfrastructure;
 import com.tf.reader.catalogue.entity.Publisher;
 import com.tf.reader.catalogue.repository.PublisherRepository;
 import com.tf.reader.common.model.RecordStatus;
+import com.tf.reader.TestcontainersConfiguration;
 
 import org.springframework.beans.factory.annotation.Autowired;
 
-@SpringBootTest(properties = "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET)
-class PublisherRepositoryTest extends ContainerisedInfrastructure {
+@Import(TestcontainersConfiguration.class)
+@SpringBootTest
+class PublisherRepositoryTest {
 
 	@Autowired
 	private PublisherRepository publisherRepository;

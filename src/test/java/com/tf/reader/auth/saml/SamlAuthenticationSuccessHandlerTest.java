@@ -19,7 +19,7 @@ import com.tf.reader.auth.repository.MockInstitutionRepository;
 import com.tf.reader.auth.repository.MockUserRepository;
 import com.tf.reader.auth.token.JwtProperties;
 import com.tf.reader.auth.token.JwtTokenService;
-import com.tf.reader.auth.saml.transaction.AuthTransactionStore;
+import com.tf.reader.auth.transaction.AuthTransactionStore;
 
 import tools.jackson.databind.json.JsonMapper;
 
