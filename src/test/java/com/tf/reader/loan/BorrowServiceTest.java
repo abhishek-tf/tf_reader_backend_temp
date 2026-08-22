@@ -20,6 +20,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 
 import com.tf.reader.catalogue.api.AccessLevel;
+import com.tf.reader.catalogue.api.EntitlementQuery;
 import com.tf.reader.catalogue.api.SubjectRef;
 import com.tf.reader.loan.api.LicenceView;
 import com.tf.reader.loan.entity.LicenceModel;
@@ -27,6 +28,7 @@ import com.tf.reader.loan.entity.Loan;
 import com.tf.reader.loan.entity.LoanStatus;
 import com.tf.reader.loan.repository.LoanRepository;
 import com.tf.reader.loan.service.BorrowService;
+import com.tf.reader.reading.api.CopyLease;
 
 /**
  * The create-flow paths of the roadmap's Days 6–7, at the service level.
@@ -45,7 +47,10 @@ class BorrowServiceTest {
 	private static final SubjectRef SUBJECT = new SubjectRef("user_1", "inst_1");
 
 	private final LoanRepository loans = mock(LoanRepository.class);
-	private final BorrowService service = new BorrowService(loans, CLOCK);
+	// create() (the LicenceCommand port) uses neither the entitlement nor the lease port — those
+	// are the borrow-flow's collaborators (see BorrowFlowTest). Mocks satisfy the constructor.
+	private final BorrowService service = new BorrowService(
+			loans, mock(EntitlementQuery.class), mock(CopyLease.class), CLOCK);
 
 	@Test
 	void subscriptionCreatesAnUnlimitedLicenceThatCanPersist() {

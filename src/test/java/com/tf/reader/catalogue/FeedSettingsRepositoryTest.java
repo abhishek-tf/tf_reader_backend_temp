@@ -9,15 +9,17 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.DuplicateKeyException;
 
-import com.tf.reader.ContainerisedInfrastructure;
+import com.tf.reader.TestcontainersConfiguration;
 import com.tf.reader.catalogue.entity.FeedSettings;
 import com.tf.reader.catalogue.entity.Shelf;
 import com.tf.reader.catalogue.repository.FeedSettingsRepository;
 
-@SpringBootTest(properties = "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET)
-class FeedSettingsRepositoryTest extends ContainerisedInfrastructure {
+@Import(TestcontainersConfiguration.class)
+@SpringBootTest
+class FeedSettingsRepositoryTest {
 
 	@Autowired
 	private FeedSettingsRepository feedSettingsRepository;
