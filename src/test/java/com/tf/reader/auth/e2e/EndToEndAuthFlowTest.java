@@ -41,6 +41,7 @@ import com.tf.reader.auth.model.UserType;
 import com.tf.reader.auth.saml.SamlAuthenticationService;
 import com.tf.reader.auth.saml.SamlAuthenticationService.SamlLoginResult;
 import com.tf.reader.auth.token.JwtProperties;
+import com.tf.reader.auth.token.JwtTokenService;
 import com.tf.reader.auth.transaction.AuthTransaction;
 import com.tf.reader.auth.transaction.AuthTransactionStore;
 import com.tf.reader.common.error.ApiException;
@@ -55,7 +56,7 @@ import com.tf.reader.common.error.ErrorCode;
  * decisions taken from it. Every hop uses the application's own beans; nothing is stubbed except
  * the assertion, which is the one thing only the external IdP can produce.
  */
-@SpringBootTest(properties = "tnf.auth.jwt.secret=" + EndToEndAuthFlowTest.SECRET)
+@SpringBootTest(properties = {"tf.security.jwt.secret=" + EndToEndAuthFlowTest.SECRET, "tf.security.jwt.access-token-ttl=1h"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class EndToEndAuthFlowTest {
@@ -360,8 +361,7 @@ class EndToEndAuthFlowTest {
 	}
 
 	private String expiredToken() {
-		return new com.tf.reader.auth.token.JwtTokenService(
-				new JwtProperties(SECRET, Duration.ofHours(1)),
+		return JwtTokenService.forTest(SECRET, Duration.ofHours(1),
 				Clock.fixed(Instant.now().minus(Duration.ofHours(3)), ZoneOffset.UTC))
 				.issue(new com.tf.reader.auth.model.TnfUser("usr_6712ab", UserType.INSTITUTION,
 						"inst_imperial", List.of("MEMBER"), List.of("col_medicine")))
@@ -369,9 +369,8 @@ class EndToEndAuthFlowTest {
 	}
 
 	private String foreignlySignedToken() {
-		return new com.tf.reader.auth.token.JwtTokenService(
-				new JwtProperties("a-different-secret-of-sufficient-length-9876543210abc", null),
-				Clock.systemUTC())
+		return JwtTokenService.forTest("a-different-secret-of-sufficient-length-9876543210abc",
+				Duration.ofHours(1), Clock.systemUTC())
 				.issue(new com.tf.reader.auth.model.TnfUser("usr_6712ab", UserType.INSTITUTION,
 						"inst_imperial", List.of("MEMBER"), List.of("col_medicine")))
 				.token();
@@ -386,8 +385,9 @@ class EndToEndAuthFlowTest {
 
 	/** A token signed with the real secret but carrying arbitrary claims. */
 	private String signed(Map<String, Object> claims) {
-		var encoder = new NimbusJwtEncoder(
-				new ImmutableSecret<>(new JwtProperties(SECRET, null).signingKey()));
+		byte[] keyBytes = SECRET.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		var signingKey = new javax.crypto.spec.SecretKeySpec(keyBytes, "HmacSHA256");
+		var encoder = new NimbusJwtEncoder(new ImmutableSecret<>(signingKey));
 		var builder = JwtClaimsSet.builder()
 				.issuedAt(Instant.now())
 				.expiresAt(Instant.now().plusSeconds(3600));

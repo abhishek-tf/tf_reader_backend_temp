@@ -62,10 +62,7 @@ class AuthControllerTest {
 		 */
 		@Bean
 		TokenService tokenService(Clock clock) {
-			return new JwtTokenService(
-					new JwtProperties("a-test-only-signing-secret-of-sufficient-length-0123456789",
-							Duration.ofHours(1)),
-					clock);
+			return JwtTokenService.forTest("a-test-only-signing-secret-of-sufficient-length-0123456789", Duration.ofHours(1), clock);
 		}
 	}
 

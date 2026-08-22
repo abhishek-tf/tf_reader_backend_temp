@@ -35,7 +35,7 @@ import com.tf.reader.auth.transaction.AuthTransactionStore;
  */
 // The application refuses to start without a signing secret, so the test context supplies a
 // throwaway one. No secret is committed for any real environment.
-@SpringBootTest(properties = "tnf.auth.jwt.secret=a-test-only-signing-secret-of-sufficient-length-0123456789")
+@SpringBootTest(properties = "tf.security.jwt.secret=a-test-only-signing-secret-of-sufficient-length-0123456789")
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class SamlLoginFlowTest {

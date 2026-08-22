@@ -40,7 +40,7 @@ import com.tf.reader.TestcontainersConfiguration;
  * fails this test, and declaring it here without opening it fails too. Making something public
  * is therefore a two-file, conscious act rather than one line in a filter chain.
  */
-@SpringBootTest(properties = "tnf.auth.jwt.secret=" + AuthorizationCoverageTest.SECRET)
+@SpringBootTest(properties = {"tf.security.jwt.secret=" + AuthorizationCoverageTest.SECRET, "tf.security.jwt.access-token-ttl=1h"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class AuthorizationCoverageTest {
@@ -56,6 +56,9 @@ class AuthorizationCoverageTest {
 	private static final Set<String> PUBLIC_ROUTES = Set.of(
 			// You cannot present a token before you have signed in.
 			"POST /api/v1/auth/saml/start",
+			"POST /api/v1/auth/dev-token",
+			"POST /api/v1/auth/oidc/start",
+			"GET /api/v1/auth/oidc/callback",
 			// Admin login is how an operator obtains a token in the first place.
 			"POST /api/admin/v1/auth/login",
 			// Refresh and logout prefer the adminRefresh cookie over a bearer token, and must

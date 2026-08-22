@@ -36,7 +36,7 @@ import com.tf.reader.auth.token.JwtTokenService;
  * then asserts none of it appears. A source-level grep would pass the day somebody adds a logger;
  * this fails.
  */
-@SpringBootTest(properties = "tnf.auth.jwt.secret=" + SensitiveDataLoggingTest.SECRET)
+@SpringBootTest(properties = {"tf.security.jwt.secret=" + SensitiveDataLoggingTest.SECRET, "tf.security.jwt.access-token-ttl=1h"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 @ExtendWith(OutputCaptureExtension.class)
@@ -77,8 +77,7 @@ class SensitiveDataLoggingTest {
 	void aRejectedTokenIsNotEchoedIntoTheLog(CapturedOutput output) throws Exception {
 		// The refusal paths are the tempting place to log "the token that failed" - which would
 		// write attacker-supplied material, and sometimes a real token, straight to disk.
-		String expired = new JwtTokenService(new JwtProperties(SECRET, Duration.ofHours(1)),
-				Clock.fixed(Instant.now().minus(Duration.ofHours(3)), ZoneOffset.UTC))
+		String expired = JwtTokenService.forTest(SECRET, Duration.ofHours(1), Clock.fixed(Instant.now().minus(Duration.ofHours(3)), ZoneOffset.UTC))
 				.issue(MEMBER).token();
 
 		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + expired));
@@ -120,7 +119,7 @@ class SensitiveDataLoggingTest {
 	}
 
 	private String tokenFor(TnfUser user) {
-		return new JwtTokenService(new JwtProperties(SECRET, Duration.ofHours(1)), Clock.systemUTC())
+		return JwtTokenService.forTest(SECRET, Duration.ofHours(1), Clock.systemUTC())
 				.issue(user).token();
 	}
 }

@@ -33,10 +33,8 @@ class JwtTokenServiceTest {
 	private static final TnfUser MEMBER = new TnfUser("usr_6712ab", UserType.INSTITUTION,
 			"inst_imperial", List.of("MEMBER"), List.of("col_medicine"));
 
-	private final JwtProperties properties = new JwtProperties(SECRET, Duration.ofHours(1));
-
 	private final TokenService tokenService =
-			new JwtTokenService(properties, Clock.fixed(NOW, ZoneOffset.UTC));
+			JwtTokenService.forTest(SECRET, Duration.ofHours(1), Clock.fixed(NOW, ZoneOffset.UTC));
 
 	private final JwtDecoder decoder = decoderAtTheTestsClock();
 
@@ -49,7 +47,9 @@ class JwtTokenServiceTest {
 	 * issuer is fixed-clock, so the verifier has to be as well.
 	 */
 	private JwtDecoder decoderAtTheTestsClock() {
-		NimbusJwtDecoder built = NimbusJwtDecoder.withSecretKey(properties.signingKey())
+		byte[] keyBytes = SECRET.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		var signingKey = new javax.crypto.spec.SecretKeySpec(keyBytes, "HmacSHA256");
+		NimbusJwtDecoder built = NimbusJwtDecoder.withSecretKey(signingKey)
 				.macAlgorithm(MacAlgorithm.HS256)
 				.build();
 		built.setJwtValidator(new com.tf.reader.auth.security.TnfJwtValidator(
@@ -92,8 +92,7 @@ class JwtTokenServiceTest {
 
 	@Test
 	void expiresAfterExactlyTheConfiguredLifetime() {
-		TokenService tenMinutes = new JwtTokenService(new JwtProperties(SECRET, Duration.ofMinutes(10)),
-				Clock.fixed(NOW, ZoneOffset.UTC));
+		TokenService tenMinutes = JwtTokenService.forTest(SECRET, Duration.ofMinutes(10), Clock.fixed(NOW, ZoneOffset.UTC));
 
 		assertThat(tenMinutes.issue(MEMBER).expiresAt()).isEqualTo(NOW.plusSeconds(600));
 	}
@@ -107,11 +106,11 @@ class JwtTokenServiceTest {
 
 	@Test
 	void carriesExactlyTheClaimsTheContractFixes() {
-		// The PRD fixes the claim set. No kid, no aud, no sub, no iss, no jti, no session id -
-		// a claim nobody agreed to is a claim somebody will start depending on.
+		// iss, aud, and token_use are required by the app decoder; the identity claims are
+		// the business data. No kid, no sub, no jti, no session id.
 		assertThat(decode(MEMBER).getClaims())
-				.containsOnlyKeys("userId", "type", "institutionId", "roles", "collections",
-						"iat", "exp");
+				.containsOnlyKeys("iss", "aud", "token_use", "userId", "type", "institutionId",
+						"roles", "collections", "iat", "exp");
 	}
 
 	@Test

@@ -124,7 +124,10 @@ public class UserSecurityConfig {
 						.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(requests -> requests
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/saml/start").permitAll()
-						.requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/v1/auth/dev-token").permitAll()
+						// OIDC: start cannot require a token; callback is a browser redirect from IdP
+						.requestMatchers(HttpMethod.POST, "/api/v1/auth/oidc/start").permitAll()
+						.requestMatchers(HttpMethod.GET, "/api/v1/auth/oidc/callback").permitAll()
 						.anyRequest().authenticated())
 				// Every request after sign-in presents the JWT that sign-in produced. Spring
 				// Security's own bearer-token filter does the header parsing and the decoding, so

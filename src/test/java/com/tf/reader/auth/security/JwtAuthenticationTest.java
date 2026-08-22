@@ -31,7 +31,7 @@ import com.tf.reader.auth.token.JwtTokenService;
  * purely to be tested. The endpoint's own contract is covered by {@code AuthMeTest}; this class
  * is about the authentication mechanics in front of it.
  */
-@SpringBootTest(properties = "tnf.auth.jwt.secret=" + JwtAuthenticationTest.SECRET)
+@SpringBootTest(properties = {"tf.security.jwt.secret=" + JwtAuthenticationTest.SECRET, "tf.security.jwt.access-token-ttl=1h"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class JwtAuthenticationTest {
@@ -110,8 +110,7 @@ class JwtAuthenticationTest {
 	@Test
 	void anExpiredTokenIsRefusedAsExpired() throws Exception {
 		// Minted an hour and a half ago with a one-hour life.
-		String expired = new JwtTokenService(new JwtProperties(SECRET, Duration.ofHours(1)),
-				Clock.fixed(Instant.now().minus(Duration.ofMinutes(90)), ZoneOffset.UTC))
+		String expired = JwtTokenService.forTest(SECRET, Duration.ofHours(1), Clock.fixed(Instant.now().minus(Duration.ofMinutes(90)), ZoneOffset.UTC))
 				.issue(MEMBER).token();
 
 		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + expired))
@@ -121,8 +120,7 @@ class JwtAuthenticationTest {
 
 	@Test
 	void aTokenSignedWithAnotherSecretIsRefused() throws Exception {
-		String foreign = new JwtTokenService(new JwtProperties(OTHER_SECRET, Duration.ofHours(1)),
-				Clock.systemUTC()).issue(MEMBER).token();
+		String foreign = JwtTokenService.forTest(OTHER_SECRET, Duration.ofHours(1), Clock.systemUTC()).issue(MEMBER).token();
 
 		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + foreign))
 				.andExpect(status().isUnauthorized())
@@ -175,7 +173,7 @@ class JwtAuthenticationTest {
 	}
 
 	private String tokenFor(TnfUser user) {
-		return new JwtTokenService(new JwtProperties(SECRET, Duration.ofHours(1)), Clock.systemUTC())
+		return JwtTokenService.forTest(SECRET, Duration.ofHours(1), Clock.systemUTC())
 				.issue(user).token();
 	}
 }

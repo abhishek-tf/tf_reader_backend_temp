@@ -47,7 +47,7 @@ import com.tf.reader.auth.token.JwtTokenService;
  *
  * <p>The API chain is stateless, so these requests are anonymous no matter what the session says.
  */
-@SpringBootTest(properties = "tnf.auth.jwt.secret=" + StatelessApiTest.SECRET)
+@SpringBootTest(properties = {"tf.security.jwt.secret=" + StatelessApiTest.SECRET, "tf.security.jwt.access-token-ttl=1h"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class StatelessApiTest {
@@ -123,7 +123,7 @@ class StatelessApiTest {
 	}
 
 	private String tokenFor(TnfUser user) {
-		return new JwtTokenService(new JwtProperties(SECRET, Duration.ofHours(1)), Clock.systemUTC())
+		return JwtTokenService.forTest(SECRET, Duration.ofHours(1), Clock.systemUTC())
 				.issue(user).token();
 	}
 
