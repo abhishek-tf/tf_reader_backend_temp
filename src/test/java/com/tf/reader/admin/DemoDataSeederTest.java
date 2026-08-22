@@ -61,15 +61,13 @@ class DemoDataSeederTest {
         assertThat(dataset.publishers()).hasSize(2);
         assertThat(dataset.collections()).hasSize(2);
         assertThat(dataset.institutions()).hasSize(3);
-        assertThat(dataset.catalogueItems()).hasSize(8);
+        assertThat(dataset.catalogueItems()).hasSize(10);
         assertThat(dataset.entitlements()).hasSize(2);
         assertThat(dataset.adminUsers()).hasSize(3);
         assertThat(dataset.feedSettings()).hasSize(3);
 
-        // One number, so an extra row cannot be added without someone updating the plan too. Twenty
-        // of these are the five sets the Week 1 plan names; collections and feedSettings are declared
-        // additions, and both are in the approach document rather than only in the data.
-        assertThat(dataset.documentCount()).isEqualTo(23);
+        // One number, so an extra row cannot be added without someone updating the plan too.
+        assertThat(dataset.documentCount()).isEqualTo(25);
     }
 
     @Test

@@ -100,8 +100,16 @@ public class QueueService {
             return new HoldView(h.getHoldId(), h.getItemId(), h.getStatus().name(), 0, queueLength, null, h.getPlacedAt(), offerView);
         }
 
+        // A missing rank means Redis and Mongo disagree about a hold that
+        // exists right now — defaulting to position 1 would show a false
+        // "you're first" to whoever actually queried this. That's the
+        // reconciler's problem to fix, not something to paper over here.
         Long rank = redis.opsForZSet().rank(queueKey, QueueKeys.member(h.getUserId()));
-        int position = rank == null ? 1 : rank.intValue() + 1;
+        if (rank == null) {
+            throw new ApiException(ErrorCode.INTERNAL_ERROR,
+                    "Queue position unavailable for hold " + h.getHoldId());
+        }
+        int position = rank.intValue() + 1;
         Integer estimatedWaitDays = estimateWaitDays(h, position, known);
         return new HoldView(h.getHoldId(), h.getItemId(), h.getStatus().name(), position, queueLength, estimatedWaitDays, h.getPlacedAt(), null);
     }
@@ -141,7 +149,13 @@ public class QueueService {
     }
 
     private static long requireNonNull(Long value) {
-        return value == null ? 1L : value;
+        // A null here means Redis didn't return a ticket at all — treating
+        // that as ticket 1 would hand out a duplicate and corrupt queue
+        // order. Fail loudly instead of guessing.
+        if (value == null) {
+            throw new ApiException(ErrorCode.INTERNAL_ERROR, "Redis did not return a ticket");
+        }
+        return value;
     }
 
     public record Placed(HoldView view, boolean created) {

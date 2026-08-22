@@ -3,6 +3,7 @@ package com.tf.reader.auth.token;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -16,6 +17,8 @@ import org.springframework.util.StringUtils;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.tf.reader.auth.model.TnfUser;
+import com.tf.reader.common.security.TokenAudience;
+import com.tf.reader.common.security.TokenClaims;
 
 /**
  * Issues the six-claim HS256 token the PRD specifies.
@@ -63,6 +66,10 @@ public class JwtTokenService implements TokenService {
 		Instant expiresAt = issuedAt.plus(properties.ttl());
 
 		JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
+				.issuer(properties.issuer())
+				.subject(user.userId())
+				.audience(List.of(TokenAudience.APP))
+				.claim(TokenClaims.TOKEN_USE, TokenClaims.USE_ACCESS)
 				.claim("userId", user.userId())
 				.claim("type", user.type().name())
 				.claim("roles", user.roles())

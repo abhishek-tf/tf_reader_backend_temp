@@ -6,9 +6,11 @@ spring:
     import: "optional:file:.env[.properties]"
   application:
     name: reader
+  profiles:
+    active: local
   data:
     mongodb:
-      uri: ${MONGODB_URI:mongodb://localhost:27017/tnfreader}
+      uri: ${MONGODB_URI}
       auto-index-creation: true
     redis:
       host: localhost
@@ -26,7 +28,7 @@ spring:
             assertingparty:
               entity-id: saml-mock
               singlesignon:
-                url: ${SAML_URL:https://samlmock.dev/idp?aud=tf-reader-sp&acs_url=http%3A%2F%2Flocalhost%3A8080%2Flogin%2Fsaml2%2Fsso%2Ftf-reader}
+                url: ${SAML_URL}
                 binding: redirect
                 sign-request: false
               verification:
@@ -35,7 +37,7 @@ spring:
 
 tf:
   catalogue:
-    base-url: ${BASE_URL:http://localhost:8080}
+    base-url: ${BASE_URL}
   security:
     jwt:
       issuer: tf-reader
@@ -44,10 +46,20 @@ tf:
       refresh-token-ttl: 12h
 
 tnf:
+  seed:
+    enabled: true
   auth:
     jwt:
       secret: ${TNF_JWT_SECRET}
       ttl: 1h
+    oidc:
+      client-id: ${OIDC_CLIENT_ID:mock-client-id}
+      client-secret: ${OIDC_CLIENT_SECRET:mock-client-secret}
+      issuer: ${OIDC_ISSUER:http://localhost:8080}
+      authorization-uri: ${OIDC_AUTHORIZATION_URI:http://localhost:8080/oauth2/v2.0/authorize}
+      token-uri: ${OIDC_TOKEN_URI:http://localhost:8080/oauth2/v2.0/token}
+      jwk-set-uri: ${OIDC_JWK_SET_URI:http://localhost:8080/oauth2/v2.0/jwks}
+      redirect-uri: ${OIDC_REDIRECT_URI:http://localhost:8080/api/v1/auth/oidc/callback}
 
 springdoc:
   api-docs:
@@ -59,3 +71,33 @@ management:
   health:
     redis:
       enabled: false
+
+
+mock-oidc:
+  enabled: false
+  
+---
+spring:
+  config:
+    activate:
+      on-profile: b2c
+
+# Belt and braces: the mock is already false by default, and stating it here
+# means "b2c" switches it off even if the profile list also carries "local".
+mock-oidc:
+  enabled: false
+
+tnf:
+  auth:
+    oidc:
+      client-id: ${OIDC_CLIENT_ID}
+      client-secret: ${OIDC_CLIENT_SECRET}
+      # The "issuer" field of the metadata document. NOT the discovery url.
+      issuer: ${OIDC_ISSUER}
+      authorization-uri: ${OIDC_AUTHORIZATION_URI}
+      token-uri: ${OIDC_TOKEN_URI}
+      # SIGNATURE VERIFICATION. Every ID token is verified against the keys
+      # published here. Point this anywhere else and sign-in stops working
+      # rather than trusting an unverified token.
+      jwk-set-uri: ${OIDC_JWK_SET_URI}
+      redirect-uri: ${OIDC_REDIRECT_URI:http://localhost:8080/api/v1/auth/oidc/callback}

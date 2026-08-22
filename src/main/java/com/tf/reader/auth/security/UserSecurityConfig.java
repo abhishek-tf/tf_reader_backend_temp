@@ -1,45 +1,38 @@
 package com.tf.reader.auth.security;
 
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrationRepository;
 import org.springframework.security.saml2.provider.service.web.authentication.OpenSaml5AuthenticationRequestResolver;
 import org.springframework.security.saml2.provider.service.web.authentication.Saml2AuthenticationRequestResolver;
 import org.springframework.security.web.SecurityFilterChain;
 
-import com.tf.reader.auth.ApiAuthenticationEntryPoint;
 import com.tf.reader.auth.saml.SamlAuthenticationFailureHandler;
 import com.tf.reader.auth.saml.SamlAuthenticationSuccessHandler;
 
 /**
- * The Service Provider side of the SAML integration, and the filter chains in front of the API.
+ * The Service Provider side of the SAML integration.
  *
- * <p><b>Two chains, and the split is a security boundary.</b> The SAML leg is stateful because
- * {@code InResponseTo} validation needs the outbound AuthnRequest held in a session; the API is
- * stateless because a session that can authenticate is a second credential that never passed
- * through {@link com.tf.reader.auth.security.TnfJwtValidator}. Keeping them in one chain is what
- * lets the JSESSIONID left behind by sign-in authenticate {@code /api/**} with no bearer token.
+ * <p><b>One chain only: the SAML leg.</b> The API surface ({@code /api/v1/**}) is protected by
+ * {@code common.security.SecurityConfig}, which declares the app resource server, wires
+ * {@code TnfJwtValidator} through {@code jwtDecoder}, and permits the public auth routes
+ * ({@code /api/v1/auth/saml/start}, {@code /api/v1/auth/oidc/*}, etc.) centrally. Having the
+ * auth module define its own secondary chain over {@code /api/v1/auth/**} created a silent
+ * coupling: the auth chain's permit-list was the authoritative list of public routes, but only
+ * because it ran before the common chain. Moving the permits into {@code SecurityConfig} makes
+ * the dependency explicit and removes a duplicate resource-server configuration.
  *
- * <p><b>One registration, every institution.</b> The relying party registration itself is
- * declared in {@code application.yml} under the single id {@code tf-reader}; there is no
- * per-institution registration and no institution anywhere in this class. The institution is
- * business data recovered from our own sign-in transaction, which is what
- * {@link SamlAuthenticationSuccessHandler} does after Spring Security has validated the
- * assertion.
+ * <p><b>The SAML leg is stateful</b> because {@code InResponseTo} validation needs the outbound
+ * AuthnRequest held in a session; the API is stateless. Keeping them in one chain is what lets
+ * the JSESSIONID left behind by sign-in authenticate {@code /api/**} with no bearer token, so
+ * they remain separate here.
  *
  * <p>Endpoints Spring Security contributes, at their defaults:
  * <ul>
- * <li>{@code GET /saml2/authenticate?registrationId=tf-reader} - builds and signs nothing,
- * redirects to the IdP with the AuthnRequest and our RelayState</li>
- * <li>{@code POST /login/saml2/sso/tf-reader} - the ACS. Validates the assertion signature
- * against the IdP certificate, the audience, the destination, the issuer, the conditions and
- * {@code InResponseTo} against the AuthnRequest held in the session</li>
+ * <li>{@code GET /saml2/authenticate?registrationId=tf-reader} — builds the AuthnRequest</li>
+ * <li>{@code POST /login/saml2/sso/tf-reader} — the ACS</li>
  * </ul>
  */
 @Configuration
@@ -85,61 +78,6 @@ public class UserSecurityConfig {
 						.authenticationRequestResolver(authenticationRequestResolver)
 						.successHandler(successHandler)
 						.failureHandler(failureHandler))
-				.formLogin(form -> form.disable())
-				.httpBasic(basic -> basic.disable())
-				.build();
-	}
-
-	/**
-	 * This module's own two endpoints: {@code /api/v1/auth/me} and {@code /api/v1/auth/saml/start}.
-	 * Bearer tokens only.
-	 *
-	 * <p><b>Scoped to {@code /api/v1/auth/**}, not the whole app API.</b> {@code
-	 * common.security.SecurityConfig} already binds the rest of {@code /api/v1/**} to its own
-	 * audience, including the paths it deliberately leaves public, like {@code
-	 * /api/v1/institutions} - a public path still runs its resource server filter for any bearer
-	 * token that IS presented, garbage or not, so a wider matcher here would make a stale or
-	 * foreign header 401 a path that is supposed to ignore it. Since only the first chain whose
-	 * matcher matches ever runs, this chain has to stay out of the way of the rest of the surface.
-	 *
-	 * <p><b>Stateless on purpose, and it is a security property rather than a performance one.</b>
-	 * A stateless chain never reads the HTTP session, so no session - including the one the SAML
-	 * leg creates - can authenticate a request here. The only way to hold an identity on this
-	 * chain is to present a token that passed signature and claim validation, which is what makes
-	 * {@code CurrentUser} the single source of truth about the caller for every module behind this
-	 * filter, not just for the ones written today.
-	 */
-	@Bean
-	@Order(2)
-	SecurityFilterChain apiFilterChain(HttpSecurity http,
-			ApiAuthenticationEntryPoint apiEntryPoint,
-			CurrentUserJwtConverter currentUserConverter,
-			@Qualifier("jwtDecoder") JwtDecoder jwtDecoder) throws Exception {
-		return http
-				.securityMatcher("/api/v1/auth/**")
-				// The API is bearer-token based: there is no cookie-authorised state-changing
-				// endpoint for CSRF protection to protect.
-				.csrf(csrf -> csrf.disable())
-				.sessionManagement(session -> session
-						.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-				.authorizeHttpRequests(requests -> requests
-						.requestMatchers(HttpMethod.POST, "/api/v1/auth/saml/start").permitAll()
-						.requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
-						.anyRequest().authenticated())
-				// Every request after sign-in presents the JWT that sign-in produced. Spring
-				// Security's own bearer-token filter does the header parsing and the decoding, so
-				// the only thing of ours in this path is the converter that turns verified claims
-				// into a CurrentUser.
-				//
-				// The entry point is set explicitly: left alone, the resource server installs its
-				// own and our JSON refusals would become empty-bodied 401s for exactly the
-				// requests that carry a token.
-				.oauth2ResourceServer(oauth2 -> oauth2
-						.authenticationEntryPoint(apiEntryPoint)
-						.jwt(jwt -> jwt.decoder(jwtDecoder).jwtAuthenticationConverter(currentUserConverter)))
-				// The app needs a 401 it can act on, not HTML it cannot parse.
-				.exceptionHandling(exceptions -> exceptions
-						.authenticationEntryPoint(apiEntryPoint))
 				.formLogin(form -> form.disable())
 				.httpBasic(basic -> basic.disable())
 				.build();

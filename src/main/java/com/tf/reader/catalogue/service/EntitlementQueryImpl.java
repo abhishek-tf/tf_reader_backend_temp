@@ -48,6 +48,13 @@ class EntitlementQueryImpl implements EntitlementQuery {
             return denied(DenyReason.CONTENT_NOT_READY);
         }
 
+        // Open access was never something an institution had to buy, so it needs no grant at
+        // all - this must run before the grant lookup below, not after, or a book with this
+        // tier and zero specific entitlements is wrongly denied as NO_ENTITLEMENT.
+        if (item.getAccessTier() == AccessTier.OPEN_ACCESS) {
+            return new EntitlementDecision(true, AccessLevel.OPEN_ACCESS, null, null, 0, null, null);
+        }
+
         Entitlement grant = mostPermissiveActiveGrant(subject.institutionId(), item);
         if (grant == null) {
             return denied(DenyReason.NO_ENTITLEMENT);
@@ -55,7 +62,7 @@ class EntitlementQueryImpl implements EntitlementQuery {
 
         return new EntitlementDecision(
                 true,
-                accessLevelFor(item, grant),
+                accessLevelFor(grant),
                 grant.getId(),
                 grant.getCopies(),
                 grant.getLoanPeriodDays(),
@@ -102,10 +109,9 @@ class EntitlementQueryImpl implements EntitlementQuery {
         return candidate.getCopies() > current.getCopies();
     }
 
-    private AccessLevel accessLevelFor(CatalogueItem item, Entitlement grant) {
-        if (item.getAccessTier() == AccessTier.OPEN_ACCESS) {
-            return AccessLevel.OPEN_ACCESS;
-        }
+    // OPEN_ACCESS is handled earlier in check(), before a grant is looked up, so this is only
+    // ever reached for a real grant now - never for an open access item.
+    private AccessLevel accessLevelFor(Entitlement grant) {
         return grant.getCopies() == null ? AccessLevel.ENTITLED_UNLIMITED : AccessLevel.ENTITLED_CONCURRENT;
     }
 

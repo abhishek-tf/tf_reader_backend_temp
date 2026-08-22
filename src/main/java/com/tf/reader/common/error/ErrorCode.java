@@ -19,6 +19,18 @@ public enum ErrorCode {
 	// The SAML response did not validate, or the sign-in transaction it referred to was unknown,
 	// already used or expired. Deliberately one code for all of those.
 	SAML_AUTHENTICATION_FAILED(HttpStatus.UNAUTHORIZED),
+
+	/**
+	 * 401. The OIDC sign-in did not complete: the authorization code could not be exchanged, the
+	 * ID token did not validate, the {@code state} did not match the request we sent, or the
+	 * sign-in transaction it referred to was unknown, already used or expired.
+	 *
+	 * <p>The OIDC counterpart of {@link #SAML_AUTHENTICATION_FAILED}, and one code for all of
+	 * those for the same reason: which part of a failed sign-in failed is useful to somebody
+	 * probing our configuration and to nobody else. No upstream provider error code or
+	 * description is ever copied into the response.
+	 */
+	OIDC_AUTHENTICATION_FAILED(HttpStatus.UNAUTHORIZED),
 	// The SAML assertion was valid, but that identity holds no membership at the institution the
 	// sign-in was started for. Authenticated is not the same as provisioned.
 	USER_NOT_PROVISIONED(HttpStatus.FORBIDDEN),

@@ -4,7 +4,7 @@ tf:
   security:
     jwt:
       # Development-only signing key. Overridable, and deliberately not a production secret.
-      secret: ${TF_JWT_SECRET:dev-only-insecure-signing-key-change-me-32b+}
+      secret: ${TF_JWT_SECRET}
 
 springdoc:
   api-docs:

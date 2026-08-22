@@ -24,7 +24,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *               token, so the app simply signs in again
  */
 @ConfigurationProperties(prefix = "tnf.auth.jwt")
-public record JwtProperties(String secret, Duration ttl) {
+public record JwtProperties(String issuer, String secret, Duration ttl) {
+
+	/** The issuer claim put into every token. Validated on inbound tokens to reject foreign ones. */
+	private static final String DEFAULT_ISSUER = "tf-reader";
 
 	/** HS256 is a 256-bit MAC; a shorter key would be rejected by the signer anyway. */
 	static final int MINIMUM_SECRET_BYTES = 32;
@@ -32,6 +35,7 @@ public record JwtProperties(String secret, Duration ttl) {
 	private static final Duration DEFAULT_TTL = Duration.ofHours(1);
 
 	public JwtProperties {
+		issuer = (issuer == null || issuer.isBlank()) ? DEFAULT_ISSUER : issuer;
 		// An unresolved ${...} placeholder arrives as its own literal text rather than as null,
 		// so without this the failure reports "secret too short" and sends whoever is deploying
 		// off to lengthen a secret that was never set.
@@ -67,6 +71,6 @@ public record JwtProperties(String secret, Duration ttl) {
 	 */
 	@Override
 	public String toString() {
-		return "JwtProperties[secret=<redacted, " + secret.length() + " chars>, ttl=" + ttl + "]";
+		return "JwtProperties[issuer=" + issuer + ", secret=<redacted, " + secret.length() + " chars>, ttl=" + ttl + "]";
 	}
 }

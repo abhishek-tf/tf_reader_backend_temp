@@ -6,18 +6,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.DuplicateKeyException;
 
-import com.tf.reader.TestcontainersConfiguration;
+import com.tf.reader.ContainerisedInfrastructure;
 import com.tf.reader.admin.entity.AdminRole;
 import com.tf.reader.admin.entity.AdminStatus;
 import com.tf.reader.admin.entity.AdminUser;
 import com.tf.reader.admin.repository.AdminUserRepository;
 
-@Import(TestcontainersConfiguration.class)
-@SpringBootTest
-class AdminUserRepositoryTest {
+@SpringBootTest(properties = "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET)
+class AdminUserRepositoryTest extends ContainerisedInfrastructure {
 
 	@Autowired
 	private AdminUserRepository adminUserRepository;

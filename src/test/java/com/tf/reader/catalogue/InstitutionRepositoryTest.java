@@ -8,18 +8,16 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.mongodb.core.query.TextCriteria;
 
-import com.tf.reader.TestcontainersConfiguration;
+import com.tf.reader.ContainerisedInfrastructure;
 import com.tf.reader.catalogue.entity.Institution;
 import com.tf.reader.catalogue.repository.InstitutionRepository;
 import com.tf.reader.common.model.RecordStatus;
 
-@Import(TestcontainersConfiguration.class)
-@SpringBootTest
-class InstitutionRepositoryTest {
+@SpringBootTest(properties = "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET)
+class InstitutionRepositoryTest extends ContainerisedInfrastructure {
 
 	@Autowired
 	private InstitutionRepository institutionRepository;

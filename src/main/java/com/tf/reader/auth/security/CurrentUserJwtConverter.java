@@ -34,14 +34,25 @@ public class CurrentUserJwtConverter implements Converter<Jwt, AbstractAuthentic
 
 	@Override
 	public AbstractAuthenticationToken convert(Jwt jwt) {
+		// getClaimAsStringList returns null when the claim is absent. TnfJwtValidator rejects
+		// such tokens before they reach here, but test slices and mock authentications can
+		// bypass the validator — null is guarded explicitly so CurrentUser's List.copyOf()
+		// does not NullPointerException in those paths.
 		List<String> roles = jwt.getClaimAsStringList("roles");
+		if (roles == null) {
+			roles = List.of();
+		}
+		List<String> collections = jwt.getClaimAsStringList("collections");
+		if (collections == null) {
+			collections = List.of();
+		}
 
 		CurrentUser currentUser = new CurrentUser(
 				jwt.getClaimAsString("userId"),
 				TnfJwtValidator.parseType(jwt.getClaimAsString("type")),
 				jwt.getClaimAsString("institutionId"),
 				roles,
-				jwt.getClaimAsStringList("collections"));
+				collections);
 
 		return new CurrentUserAuthenticationToken(currentUser, jwt, authorities(roles));
 	}

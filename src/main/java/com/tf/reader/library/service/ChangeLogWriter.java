@@ -1,0 +1,68 @@
+package com.tf.reader.library.service;
+
+import java.time.temporal.ChronoUnit;
+
+import org.springframework.stereotype.Service;
+
+import com.tf.reader.library.api.ChangeLog;
+import com.tf.reader.library.api.ChangeRecord;
+import com.tf.reader.library.entity.ChangeLogEntry;
+import com.tf.reader.library.repository.ChangeLogRepository;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * The only implementation of {@link ChangeLog}, and the only writer of the change log.
+ */
+@Slf4j
+@Service
+public class ChangeLogWriter implements ChangeLog {
+
+	/** What {@link #record} returns when nothing was written. Never a real sequence. */
+	private static final long NOT_RECORDED = 0L;
+
+	private final ChangeLogRepository changeLog;
+	private final ReaderSequenceAllocator sequences;
+
+	public ChangeLogWriter(ChangeLogRepository changeLog, ReaderSequenceAllocator sequences) {
+		this.changeLog = changeLog;
+		this.sequences = sequences;
+	}
+
+	@Override
+	public long record(ChangeRecord change) {
+		try {
+			long sequence = sequences.next(change.userId());
+
+			changeLog.save(ChangeLogEntry.builder()
+					.userId(change.userId())
+					.sequence(sequence)
+					.reason(change.reason())
+					.itemId(change.itemId())
+					.loanId(change.loanId())
+					.holdId(change.holdId())
+					// Whole seconds, because that is what goes on the wire. Truncating here rather
+					// than at serialisation keeps the stored value equal to the value the app sees.
+					.occurredAt(change.occurredAt().truncatedTo(ChronoUnit.SECONDS))
+					.build());
+
+			return sequence;
+		}
+		catch (RuntimeException failed) {
+			// Deliberately swallowed, and this is the whole point of task 8. This runs inside the
+			// caller's transaction — Shashank's return path, Khushi's promotion — and a reader whose
+			// return actually succeeded must never be told "returning this book failed" because our
+			// feed write did not. Rethrowing would also put the person debugging it in the wrong
+			// lane entirely.
+			//
+			// Safe to swallow because the feed is not the source of truth: GET /api/v1/library reads
+			// the real loans and holds, so a lost entry is a delayed screen rather than a wrong one.
+			// Logged at error because it is still a defect — a lost ENTITLEMENT_REVOKED is the one
+			// case the full read does not paper over quickly.
+			log.error("change log write failed, reader={} reason={} item={} — entry lost",
+					change.userId(), change.reason(), change.itemId(), failed);
+			return NOT_RECORDED;
+		}
+	}
+
+}

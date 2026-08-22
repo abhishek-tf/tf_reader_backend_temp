@@ -8,9 +8,8 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 
-import com.tf.reader.TestcontainersConfiguration;
+import com.tf.reader.ContainerisedInfrastructure;
 import com.tf.reader.catalogue.entity.CatalogueItem;
 import com.tf.reader.catalogue.entity.ItemStatus;
 import com.tf.reader.catalogue.entity.Publisher;
@@ -18,9 +17,8 @@ import com.tf.reader.catalogue.repository.CatalogueItemRepository;
 import com.tf.reader.catalogue.repository.PublisherRepository;
 import com.tf.reader.common.model.RecordStatus;
 
-@Import(TestcontainersConfiguration.class)
-@SpringBootTest
-class CatalogueItemRepositoryTest {
+@SpringBootTest(properties = "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET)
+class CatalogueItemRepositoryTest extends ContainerisedInfrastructure {
 
 	@Autowired
 	private CatalogueItemRepository catalogueItemRepository;

@@ -10,9 +10,11 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 import com.tf.reader.auth.model.UserType;
+import com.tf.reader.common.security.TokenAudience;
+import com.tf.reader.common.security.TokenClaims;
 
 /**
- * Checks a decoded token's expiry and required claims.
+ * Checks a decoded token's expiry, structural claims, issuer, audience, and token_use.
  *
  * <p>Runs after the signature has been verified - a token that failed cryptographic
  * verification never reaches here.
@@ -32,9 +34,22 @@ public class TnfJwtValidator implements OAuth2TokenValidator<Jwt> {
 	/** Our error code for a token that is structurally unusable as an identity. */
 	public static final String MISSING_CLAIMS = "tnf_token_missing_claims";
 
+	/** The issuer we put into every token we mint. */
+	private final String expectedIssuer;
+
+	/** The single audience valid for app tokens. */
+	private final String expectedAudience;
+
 	private final Clock clock;
 
-	public TnfJwtValidator(Clock clock) {
+	/**
+	 * @param expectedIssuer  the {@code iss} claim value from {@code tnf.auth.jwt} config
+	 * @param expectedAudience the single audience string this validator accepts (e.g. {@link TokenAudience#APP})
+	 * @param clock            injected clock so expiry tests don't require waiting
+	 */
+	public TnfJwtValidator(String expectedIssuer, String expectedAudience, Clock clock) {
+		this.expectedIssuer = expectedIssuer;
+		this.expectedAudience = expectedAudience;
 		this.clock = clock;
 	}
 
@@ -50,11 +65,36 @@ public class TnfJwtValidator implements OAuth2TokenValidator<Jwt> {
 			return failure(EXPIRED, "The token expired at " + expiresAt + ".");
 		}
 
+		// ── Issuer ──
+		// Compared against the configured value, not derived: a token signed with the same
+		// secret but issued by something else (e.g. a stolen key) must be refused.
+		Object issuerClaim = jwt.getClaims().get("iss");
+		String issuer = issuerClaim instanceof String value ? value : null;
+		if (!expectedIssuer.equals(issuer)) {
+			return failure(MISSING_CLAIMS, "The token was not issued by this service.");
+		}
+
+		// ── Audience ──
+		// Must be exactly the one audience this decoder is configured for. A token minted
+		// for a different surface (e.g. admin) is rejected even if the signature is valid.
+		List<String> audience = jwt.getAudience();
+		if (audience == null || audience.size() != 1 || !expectedAudience.equals(audience.get(0))) {
+			return failure(MISSING_CLAIMS, "The token audience does not match this service.");
+		}
+
+		// ── Token use ──
+		// Distinguishes access tokens from any future refresh or other token types on the
+		// same signing key. A token whose use is not 'access' is refused here rather than
+		// reaching a controller and performing an action.
+		Object tokenUse = jwt.getClaims().get(TokenClaims.TOKEN_USE);
+		if (!TokenClaims.USE_ACCESS.equals(tokenUse)) {
+			return failure(MISSING_CLAIMS, "The token is not an access token.");
+		}
+
+		// ── Identity claims ──
 		// Types are checked on the RAW claims. Spring's getClaimAsString / getClaimAsStringList
 		// coerce: a numeric roles claim becomes ["123"] and a numeric userId becomes "99", so a
-		// structurally wrong token would be accepted and silently reinterpreted. Only we can sign,
-		// so that is defence in depth rather than a hole - but a token whose shape we never issue
-		// should be refused, not guessed at.
+		// structurally wrong token would be accepted and silently reinterpreted.
 		if (!(jwt.getClaims().get("userId") instanceof String userId) || isBlank(userId)) {
 			return failure(MISSING_CLAIMS, "The token carries no usable userId.");
 		}
@@ -75,12 +115,7 @@ public class TnfJwtValidator implements OAuth2TokenValidator<Jwt> {
 			return failure(MISSING_CLAIMS, "The token carries an unusable institutionId.");
 		}
 		// The type and the institution have to agree, because CurrentUser answers "do you belong
-		// to an institution?" from institutionId alone. An INDIVIDUAL carrying one would therefore
-		// pass requireSameInstitution for that institution - a subscriber reading a tenant's
-		// resources - and an INSTITUTION user carrying none is an identity whose tenant we do not
-		// know. Neither is a shape we ever issue; UserType says so, and this is where that stops
-		// being a comment. Only we can sign, so this is defence in depth for the day the user
-		// store behind the mapper is somebody else's collection.
+		// to an institution?" from institutionId alone.
 		boolean hasInstitution = institutionId instanceof String value && !isBlank(value);
 		if (hasInstitution != (parseType(type) == UserType.INSTITUTION)) {
 			return failure(MISSING_CLAIMS,

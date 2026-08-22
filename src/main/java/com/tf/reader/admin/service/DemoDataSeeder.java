@@ -470,7 +470,8 @@ public class DemoDataSeeder implements ApplicationRunner {
                 s.pageSize(),
                 s.defaultSort(),
                 shelves,
-                s.updatedAt());
+                s.updatedAt(),
+                0L);
     }
 
     private Shelf toShelf(SeedDataset.SeedShelf s) {

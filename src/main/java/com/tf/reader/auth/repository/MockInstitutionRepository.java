@@ -22,6 +22,7 @@ public class MockInstitutionRepository {
 
 	private static final Map<String, Institution> INSTITUTIONS = Map.of(
 			// Reproduced from the API Reference worked example, so fixtures agree across teams.
+			"inst_7f3", new Institution("inst_7f3", "Imperial College London"),
 			"inst_imperial", new Institution("inst_imperial", "Imperial College"),
 			"inst_dsu", new Institution("inst_dsu", "Dayananda Sagar University"),
 			"inst_xyz", new Institution("inst_xyz", "University XYZ"));

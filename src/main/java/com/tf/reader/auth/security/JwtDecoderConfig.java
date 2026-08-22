@@ -9,6 +9,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 
 import com.tf.reader.auth.token.JwtProperties;
+import com.tf.reader.common.security.TokenAudience;
 
 /**
  * The verifying half of the token design.
@@ -17,6 +18,11 @@ import com.tf.reader.auth.token.JwtProperties;
  * algorithm cannot drift apart: there is one secret in the application and one place it is
  * configured. A second signing mechanism, or a decoder given its own copy of the key, is how a
  * service ends up unable to verify tokens it minted itself.
+ *
+ * <p><b>Issuer and audience are enforced here.</b> {@link TnfJwtValidator} now receives the
+ * expected issuer from {@link JwtProperties} and the fixed app audience {@link TokenAudience#APP},
+ * so a token signed with the same key but carrying the wrong issuer or a different audience
+ * (such as an admin token) is refused during decoding, before any controller runs.
  */
 @Configuration
 public class JwtDecoderConfig {
@@ -26,10 +32,9 @@ public class JwtDecoderConfig {
 		NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(properties.signingKey())
 				.macAlgorithm(MacAlgorithm.HS256)
 				.build();
-		// Replaces Spring's default validator chain outright. The default checks expiry with
-		// the system clock and reports it through a message string; ours checks expiry and the
-		// claims we actually require, with codes the entry point can branch on.
-		decoder.setJwtValidator(new TnfJwtValidator(clock));
+		// Pass the issuer string from config and the fixed app audience into the validator.
+		// TnfJwtValidator now checks: expiry, iss, aud, token_use, and all identity claims.
+		decoder.setJwtValidator(new TnfJwtValidator(properties.issuer(), TokenAudience.APP, clock));
 		return decoder;
 	}
 }

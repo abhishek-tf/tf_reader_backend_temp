@@ -31,4 +31,8 @@ public class FeedSettings {
 	private List<Shelf> shelves;
 	private Instant updatedAt;
 
+	// For optimistic locking. Defaults to 0 so a first save (nothing stored yet) matches
+	// the version 0 the GET default view reports.
+	private long version;
+
 }

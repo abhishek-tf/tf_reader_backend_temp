@@ -41,8 +41,8 @@ import com.tf.reader.auth.model.UserType;
 import com.tf.reader.auth.saml.SamlAuthenticationService;
 import com.tf.reader.auth.saml.SamlAuthenticationService.SamlLoginResult;
 import com.tf.reader.auth.token.JwtProperties;
-import com.tf.reader.auth.transaction.AuthTransaction;
-import com.tf.reader.auth.transaction.AuthTransactionStore;
+import com.tf.reader.auth.saml.transaction.AuthTransaction;
+import com.tf.reader.auth.saml.transaction.AuthTransactionStore;
 import com.tf.reader.common.error.ApiException;
 import com.tf.reader.common.error.ErrorCode;
 

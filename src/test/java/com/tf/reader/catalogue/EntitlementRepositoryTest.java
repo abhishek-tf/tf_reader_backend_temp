@@ -8,18 +8,16 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.DuplicateKeyException;
 
-import com.tf.reader.TestcontainersConfiguration;
+import com.tf.reader.ContainerisedInfrastructure;
 import com.tf.reader.catalogue.entity.Entitlement;
 import com.tf.reader.catalogue.entity.EntitlementStatus;
 import com.tf.reader.catalogue.entity.ScopeType;
 import com.tf.reader.catalogue.repository.EntitlementRepository;
 
-@Import(TestcontainersConfiguration.class)
-@SpringBootTest
-class EntitlementRepositoryTest {
+@SpringBootTest(properties = "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET)
+class EntitlementRepositoryTest extends ContainerisedInfrastructure {
 
 	@Autowired
 	private EntitlementRepository entitlementRepository;

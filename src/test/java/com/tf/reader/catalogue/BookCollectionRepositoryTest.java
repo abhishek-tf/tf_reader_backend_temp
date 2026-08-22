@@ -6,16 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.DuplicateKeyException;
 
-import com.tf.reader.TestcontainersConfiguration;
+import com.tf.reader.ContainerisedInfrastructure;
 import com.tf.reader.catalogue.entity.BookCollection;
 import com.tf.reader.catalogue.repository.BookCollectionRepository;
 
-@Import(TestcontainersConfiguration.class)
-@SpringBootTest
-class BookCollectionRepositoryTest {
+@SpringBootTest(properties = "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET)
+class BookCollectionRepositoryTest extends ContainerisedInfrastructure {
 
 	@Autowired
 	private BookCollectionRepository bookCollectionRepository;

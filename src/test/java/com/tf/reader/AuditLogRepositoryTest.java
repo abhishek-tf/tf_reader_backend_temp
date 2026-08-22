@@ -9,14 +9,12 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 
 import com.tf.reader.common.audit.AuditLog;
 import com.tf.reader.common.audit.AuditLogRepository;
 
-@Import(TestcontainersConfiguration.class)
-@SpringBootTest
-class AuditLogRepositoryTest {
+@SpringBootTest(properties = "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET)
+class AuditLogRepositoryTest extends ContainerisedInfrastructure {
 
 	@Autowired
 	private AuditLogRepository auditLogRepository;

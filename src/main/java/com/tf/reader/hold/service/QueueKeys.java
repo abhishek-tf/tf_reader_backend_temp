@@ -39,6 +39,13 @@ public final class QueueKeys {
     }
 
     public static String userOf(String member) {
+        // Parses data this class itself wrote into Redis. A member that
+        // doesn't start with the "u:" prefix means something else wrote to
+        // this key, or the data is corrupt — fail loudly rather than throw
+        // an unhelpful StringIndexOutOfBoundsException three lines away.
+        if (member == null || !member.startsWith("u:")) {
+            throw new IllegalStateException("Not a queue member: " + member);
+        }
         return member.substring(2);
     }
 }
