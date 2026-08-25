@@ -34,7 +34,7 @@ public class AdminAuditWriter {
 		log.setEntityId(entityId);
 		log.setBefore(strip(before));
 		log.setAfter(strip(after));
-		log.setMeta(meta);
+		log.setMeta(strip(meta));
 		log.setAt(Instant.now());
 
 		auditLogRepository.save(log);

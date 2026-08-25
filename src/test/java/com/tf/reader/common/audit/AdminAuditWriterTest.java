@@ -50,6 +50,22 @@ class AdminAuditWriterTest {
 		assertThat(saved.getAfter()).containsOnlyKeys("status");
 	}
 
+	@Test
+	void stripsSensitiveKeysFromMetaToo() {
+		Map<String, Object> meta = Map.of("passwordChanged", true, "password", "hunter2", "refreshToken", "r");
+
+		writer.record("adm_03", AuditLog.Action.UPDATE, "ADMIN_USER", "adm_9", null, null, meta);
+
+		assertThat(savedLog().getMeta()).containsOnlyKeys("passwordChanged");
+	}
+
+	@Test
+	void leavesMetaNullWhenTheCallerPassesNone() {
+		writer.record("adm_04", AuditLog.Action.UPDATE, "ADMIN_USER", "adm_9", null, null);
+
+		assertThat(savedLog().getMeta()).isNull();
+	}
+
 	private AuditLog savedLog() {
 		ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
 		verify(auditLogRepository).save(captor.capture());
