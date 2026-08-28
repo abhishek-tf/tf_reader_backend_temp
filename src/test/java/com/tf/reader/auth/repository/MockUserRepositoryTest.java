@@ -19,20 +19,20 @@ class MockUserRepositoryTest {
 
 	@Test
 	void findsTheSeededUserForAnIdentityAndInstitution() {
-		assertThat(users.find("john.doe@example.com", "inst_imperial"))
+		assertThat(users.find("john.doe@example.com", "inst_7f3"))
 				.get()
 				.satisfies(user -> {
 					assertThat(user.userId()).isEqualTo("usr_6712ab");
 					assertThat(user.type()).isEqualTo(UserType.INSTITUTION);
-					assertThat(user.institutionId()).isEqualTo("inst_imperial");
+					assertThat(user.institutionId()).isEqualTo("inst_7f3");
 				});
 	}
 
 	@Test
 	void theSameIdentityIsADifferentUserAtEachInstitution() {
 		// One IdP, many institutions: the pair is the key, not the email.
-		TnfUser imperial = users.find("john.doe@example.com", "inst_imperial").orElseThrow();
-		TnfUser dsu = users.find("john.doe@example.com", "inst_dsu").orElseThrow();
+		TnfUser imperial = users.find("john.doe@example.com", "inst_7f3").orElseThrow();
+		TnfUser dsu = users.find("john.doe@example.com", "inst_ucl").orElseThrow();
 
 		assertThat(imperial.userId()).isNotEqualTo(dsu.userId());
 		assertThat(imperial.collections()).isNotEqualTo(dsu.collections());
@@ -48,8 +48,8 @@ class MockUserRepositoryTest {
 		try {
 			Locale.setDefault(Locale.forLanguageTag("tr-TR"));
 
-			assertThat(users.find("JOHN.DOE@EXAMPLE.COM", "inst_imperial")).isPresent();
-			assertThat(users.find("Jane.Roe@Example.Com", "inst_imperial")).isPresent();
+			assertThat(users.find("JOHN.DOE@EXAMPLE.COM", "inst_7f3")).isPresent();
+			assertThat(users.find("Jane.Roe@Example.Com", "inst_7f3")).isPresent();
 			// The fold must be the locale-independent one, whatever the JVM was started with.
 			assertThat("IRIS@EXAMPLE.COM".toLowerCase(Locale.ROOT))
 					.isNotEqualTo("IRIS@EXAMPLE.COM".toLowerCase());
@@ -61,21 +61,21 @@ class MockUserRepositoryTest {
 
 	@Test
 	void lookupIsDeterministic() {
-		assertThat(users.find("john.doe@example.com", "inst_imperial"))
-				.isEqualTo(users.find("john.doe@example.com", "inst_imperial"));
+		assertThat(users.find("john.doe@example.com", "inst_7f3"))
+				.isEqualTo(users.find("john.doe@example.com", "inst_7f3"));
 	}
 
 	@Test
 	void anIdentityIsNotFoundAtAnInstitutionItHasNoMembershipAt() {
-		assertThat(users.find("jane.roe@example.com", "inst_imperial")).isPresent();
-		assertThat(users.find("jane.roe@example.com", "inst_dsu")).isEmpty();
+		assertThat(users.find("jane.roe@example.com", "inst_7f3")).isPresent();
+		assertThat(users.find("jane.roe@example.com", "inst_ucl")).isEmpty();
 	}
 
 	@Test
 	void authenticationDoesNotSucceedForArbitraryAddresses() {
-		assertThat(users.find("attacker@example.com", "inst_imperial")).isEmpty();
-		assertThat(users.find("", "inst_imperial")).isEmpty();
-		assertThat(users.find(null, "inst_imperial")).isEmpty();
+		assertThat(users.find("attacker@example.com", "inst_7f3")).isEmpty();
+		assertThat(users.find("", "inst_7f3")).isEmpty();
+		assertThat(users.find(null, "inst_7f3")).isEmpty();
 		assertThat(users.find("john.doe@example.com", null)).isEmpty();
 		assertThat(users.find("john.doe@example.com", "inst_nowhere")).isEmpty();
 	}
@@ -83,13 +83,13 @@ class MockUserRepositoryTest {
 	@Test
 	void emailIsMatchedCaseInsensitivelyAndTrimmed() {
 		// An IdP is free to vary the case of an address it asserts.
-		assertThat(users.find("  John.Doe@Example.COM ", "inst_imperial"))
-				.isEqualTo(users.find("john.doe@example.com", "inst_imperial"));
+		assertThat(users.find("  John.Doe@Example.COM ", "inst_7f3"))
+				.isEqualTo(users.find("john.doe@example.com", "inst_7f3"));
 	}
 
 	@Test
 	void seededUsersAreImmutable() {
-		TnfUser user = users.find("john.doe@example.com", "inst_imperial").orElseThrow();
+		TnfUser user = users.find("john.doe@example.com", "inst_7f3").orElseThrow();
 
 		assertThat(user.roles()).isUnmodifiable();
 		assertThat(user.collections()).isUnmodifiable();

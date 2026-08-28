@@ -25,4 +25,10 @@ public interface ActiveLoanQuery {
 	 * not-yet-swept row is excluded. Returned newest-first ({@code borrowedAt} descending).
 	 */
 	List<ActiveLoanView> findAllFor(String userId);
+
+	/**
+	 * Every live ELITE loan, for any reader, in any institution — the reconciler's rebuild read.
+	 * Applies the same D-006 liveness rule: a lapsed-but-not-yet-swept row is excluded.
+	 */
+	List<ActiveLoanView> findAllActiveElite();
 }

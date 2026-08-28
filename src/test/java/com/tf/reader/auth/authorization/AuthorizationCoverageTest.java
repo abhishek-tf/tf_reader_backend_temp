@@ -59,6 +59,19 @@ class AuthorizationCoverageTest {
 			"POST /api/v1/auth/dev-token",
 			"POST /api/v1/auth/oidc/start",
 			"GET /api/v1/auth/oidc/callback",
+			// A one-time code, and an opaque refresh token, authenticate these - neither is a
+			// bearer JWT, so there is nothing for this chain to check before the controller runs.
+			"POST /api/v1/auth/token",
+			"POST /api/v1/auth/refresh",
+			// The mock OIDC provider and mock SAML IdP: dev-only fixtures pretending to be an
+			// external party, never enabled outside a local profile. We do not authenticate
+			// against ourselves before answering as the identity provider we are pretending to be.
+			"GET /.well-known/openid-configuration",
+			"GET /oauth2/authorize",
+			"POST /oauth2/authorize",
+			"GET /oauth2/jwks",
+			"POST /oauth2/token",
+			"GET /saml-mock/sso",
 			// Admin login is how an operator obtains a token in the first place.
 			"POST /api/admin/v1/auth/login",
 			// Refresh and logout prefer the adminRefresh cookie over a bearer token, and must

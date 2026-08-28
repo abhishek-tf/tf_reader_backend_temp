@@ -87,17 +87,15 @@ class AvailabilityIT extends HoldContainerTest {
     }
 
     @Test
-    @DisplayName("queueLength reflects a real queue, not a guess")
-    void reflectsARealQueue() {
-        // CopyLease is back to reading's own stub (belongs to Deepak, not
-        // hold) - available() can't be asserted against real lease math
-        // here until his real implementation lands. queueLength never went
-        // through CopyLease at all, so it's still a real assertion.
+    @DisplayName("available and queueLength reflect real leases and a real queue, not a guess")
+    void reflectsRealLeasesAndARealQueue() {
+        lease.claim(SCOPE, ITEM, 2);
         queue.join(user("a"), ITEM);
         queue.join(user("b"), ITEM);
 
         var snapshot = availability.forItem(SCOPE, ITEM, 2);
 
+        assertThat(snapshot.available()).isEqualTo(1);
         assertThat(snapshot.queueLength()).isEqualTo(2);
     }
 

@@ -9,6 +9,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
 import com.tf.reader.loan.entity.Loan;
+import com.tf.reader.loan.entity.LicenceModel;
 import com.tf.reader.loan.entity.LoanStatus;
 
 /**
@@ -36,6 +37,9 @@ public interface LoanRepository extends MongoRepository<Loan, String> {
 
 	/** All ACTIVE loans for one reader — used by {@code ActiveLoanQuery.findAllFor} (D-025). */
 	List<Loan> findByUserIdAndStatus(String userId, LoanStatus status);
+
+	/** Every ACTIVE ELITE loan, any reader — the reconciler's rebuild read. */
+	List<Loan> findByStatusAndLicenceModel(LoanStatus status, LicenceModel licenceModel);
 
 	/** The personal library listing, scoped to one reader (the token's user). */
 	Page<Loan> findByUserId(String userId, Pageable pageable);

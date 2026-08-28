@@ -11,6 +11,7 @@ import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,10 +23,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.tf.reader.ContainerisedInfrastructure;
+import com.tf.reader.auth.AuthTestInstitutions;
 import com.tf.reader.auth.model.TnfUser;
 import com.tf.reader.auth.model.UserType;
 import com.tf.reader.auth.token.JwtProperties;
 import com.tf.reader.auth.token.JwtTokenService;
+import com.tf.reader.catalogue.repository.InstitutionRepository;
 
 /**
  * Definition of Done #5: no secret, password, token or device key in any log line - "checked by a
@@ -43,10 +46,18 @@ class SensitiveDataLoggingTest extends ContainerisedInfrastructure {
 	static final String SECRET = "a-test-only-signing-secret-of-sufficient-length-0123456789";
 
 	private static final TnfUser MEMBER = new TnfUser("usr_6712ab", UserType.INSTITUTION,
-			"inst_imperial", List.of("MEMBER"), List.of("col_medicine"));
+			"inst_7f3", List.of("MEMBER"), List.of("col_medicine"));
 
 	@Autowired
 	private MockMvc mockMvc;
+
+	@Autowired
+	private InstitutionRepository institutions;
+
+	@BeforeEach
+	void seedInstitutions() {
+		AuthTestInstitutions.seed(institutions);
+	}
 
 	@Test
 	void aValidTokenIsNeverWrittenToTheLog(CapturedOutput output) throws Exception {
@@ -62,9 +73,7 @@ class SensitiveDataLoggingTest extends ContainerisedInfrastructure {
 	@Test
 	void theSigningSecretIsNeverWrittenToTheLog(CapturedOutput output) throws Exception {
 		// Reached the widest set of code paths first: sign-in, a good token, a bad token.
-		mockMvc.perform(post("/api/v1/auth/saml/start")
-				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"institutionId\":\"inst_imperial\"}"));
+		mockMvc.perform(post("/api/v1/auth/saml/start").param("institutionId", "inst_7f3"));
 		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + tokenFor(MEMBER)));
 		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer not-a-jwt"));
 
@@ -110,7 +119,7 @@ class SensitiveDataLoggingTest extends ContainerisedInfrastructure {
 
 		String printed = new CurrentUserAuthenticationToken(
 				new com.tf.reader.auth.model.CurrentUser("usr_6712ab", UserType.INSTITUTION,
-						"inst_imperial", List.of("MEMBER"), List.of("col_medicine")),
+						"inst_7f3", List.of("MEMBER"), List.of("col_medicine")),
 				jwt, List.of()).toString();
 
 		assertThat(printed).doesNotContain(token);

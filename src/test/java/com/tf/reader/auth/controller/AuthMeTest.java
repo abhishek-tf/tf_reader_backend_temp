@@ -18,16 +18,11 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.tf.reader.ContainerisedInfrastructure;
 import com.tf.reader.auth.model.TnfUser;
 import com.tf.reader.auth.model.UserType;
-import com.tf.reader.auth.security.TnfJwtValidator;
-import com.tf.reader.auth.token.JwtProperties;
 import com.tf.reader.auth.token.JwtTokenService;
 
 /**
@@ -45,7 +40,7 @@ class AuthMeTest extends ContainerisedInfrastructure {
 	private static final Instant NOW = Instant.parse("2026-08-13T14:42:00Z");
 
 	private static final TnfUser MEMBER = new TnfUser("usr_6712ab", UserType.INSTITUTION,
-			"inst_imperial", List.of("MEMBER"), List.of("col_medicine"));
+			"inst_7f3", List.of("MEMBER"), List.of("col_medicine"));
 
 	private static final TnfUser INDIVIDUAL = new TnfUser("usr_9f01cd", UserType.INDIVIDUAL, null,
 			List.of("SUBSCRIBER"), List.of("col_open"));
@@ -77,7 +72,7 @@ class AuthMeTest extends ContainerisedInfrastructure {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.userId").value("usr_6712ab"))
 				.andExpect(jsonPath("$.type").value("INSTITUTION"))
-				.andExpect(jsonPath("$.institutionId").value("inst_imperial"))
+				.andExpect(jsonPath("$.institutionId").value("inst_7f3"))
 				.andExpect(jsonPath("$.roles[0]").value("MEMBER"))
 				.andExpect(jsonPath("$.collections[0]").value("col_medicine"));
 	}
@@ -89,39 +84,23 @@ class AuthMeTest extends ContainerisedInfrastructure {
 	}
 
 	@Test
-	void expiresAtDescribesTheNewlyIssuedToken() throws Exception {
-		// One hour from now, per JwtProperties - not the incoming token's expiry, and not a
-		// duration written down a second time in the controller.
+	void expiresAtDescribesThePresentedTokenNotANewOne() throws Exception {
+		// tokenFor mints a one-hour token at NOW, so expiresAt must describe exactly that token -
+		// nothing is minted by this endpoint any more, so there is no other value it could report.
 		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + tokenFor(MEMBER)))
 				.andExpect(jsonPath("$.expiresAt").value("2026-08-13T15:42:00Z"));
 	}
 
 	@Test
-	void theReissuedTokenIsUsableAndCarriesTheSameIdentity() throws Exception {
-		// Proves the session can actually slide: the token handed back authenticates on its own.
-		String body = mockMvc.perform(get("/api/v1/auth/me")
-						.header("Authorization", "Bearer " + tokenFor(MEMBER)))
-				.andReturn().getResponse().getContentAsString();
-		String reissued = body.replaceAll(".*\"token\"\\s*:\\s*\"([^\"]+)\".*", "$1");
+	void callingMeTwiceReturnsTheSameExpiryBecauseNothingIsReissued() throws Exception {
+		// The session no longer slides here: a real refresh token exists now (POST /auth/refresh),
+		// so repeated reads must not extend the token's life.
+		String token = tokenFor(MEMBER);
 
-		// The decoder is pinned to the test's clock. Left at Spring's defaults it would judge
-		// expiry by the SYSTEM clock, and this token was minted by a fixed one - so the test would
-		// pass for an hour after NOW and then fail forever with "Jwt expired", which reads like a
-		// production bug rather than a test pinned to a date.
-		NimbusJwtDecoder decoder =
-				NimbusJwtDecoder.withSecretKey(new JwtProperties(SECRET, null).signingKey())
-						.macAlgorithm(MacAlgorithm.HS256)
-						.build();
-		decoder.setJwtValidator(new TnfJwtValidator(Clock.fixed(NOW, ZoneOffset.UTC)));
-
-		Jwt decoded = decoder.decode(reissued);
-
-		assertThat(decoded.getClaimAsString("userId")).isEqualTo("usr_6712ab");
-		assertThat(decoded.getExpiresAt()).isEqualTo(NOW.plus(Duration.ofHours(1)));
-
-		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + reissued))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.userId").value("usr_6712ab"));
+		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + token))
+				.andExpect(jsonPath("$.expiresAt").value("2026-08-13T15:42:00Z"));
+		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + token))
+				.andExpect(jsonPath("$.expiresAt").value("2026-08-13T15:42:00Z"));
 	}
 
 	@Test
@@ -140,10 +119,11 @@ class AuthMeTest extends ContainerisedInfrastructure {
 
 	@Test
 	void returnsExactlyTheContractFields() throws Exception {
-		// Nothing invented beyond the documented shape except token, which is flagged as an
-		// open contract point on AuthMeResponse.
+		// Nothing invented beyond the documented shape. No token of any kind is minted here any
+		// more - that is POST /auth/refresh's job now.
 		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + tokenFor(MEMBER)))
-				.andExpect(jsonPath("$.*", org.hamcrest.Matchers.hasSize(8)))
+				.andExpect(jsonPath("$.*", org.hamcrest.Matchers.hasSize(7)))
+				.andExpect(jsonPath("$.token").doesNotExist())
 				.andExpect(jsonPath("$.refreshToken").doesNotExist())
 				.andExpect(jsonPath("$.accessToken").doesNotExist())
 				.andExpect(jsonPath("$.idToken").doesNotExist());
@@ -155,14 +135,14 @@ class AuthMeTest extends ContainerisedInfrastructure {
 		// because "ignored" is a claim worth proving rather than asserting in a comment.
 		mockMvc.perform(get("/api/v1/auth/me")
 						.queryParam("userId", "usr_admin")
-						.queryParam("institutionId", "inst_dsu")
+						.queryParam("institutionId", "inst_ucl")
 						.queryParam("roles", "ADMIN")
 						.queryParam("type", "INDIVIDUAL")
 						.queryParam("collections", "col_everything")
 						.header("Authorization", "Bearer " + tokenFor(MEMBER)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.userId").value("usr_6712ab"))
-				.andExpect(jsonPath("$.institutionId").value("inst_imperial"))
+				.andExpect(jsonPath("$.institutionId").value("inst_7f3"))
 				.andExpect(jsonPath("$.roles[0]").value("MEMBER"))
 				.andExpect(jsonPath("$.type").value("INSTITUTION"))
 				.andExpect(jsonPath("$.collections[0]").value("col_medicine"));
@@ -175,12 +155,12 @@ class AuthMeTest extends ContainerisedInfrastructure {
 		mockMvc.perform(get("/api/v1/auth/me")
 						.header("Authorization", "Bearer " + tokenFor(MEMBER))
 						.header("X-User-Id", "usr_admin")
-						.header("X-Institution-Id", "inst_dsu")
+						.header("X-Institution-Id", "inst_ucl")
 						.header("X-Roles", "ADMIN")
 						.header("X-Forwarded-User", "usr_admin"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.userId").value("usr_6712ab"))
-				.andExpect(jsonPath("$.institutionId").value("inst_imperial"))
+				.andExpect(jsonPath("$.institutionId").value("inst_7f3"))
 				.andExpect(jsonPath("$.roles[0]").value("MEMBER"))
 				.andExpect(jsonPath("$.roles", org.hamcrest.Matchers.hasSize(1)));
 	}
@@ -192,12 +172,12 @@ class AuthMeTest extends ContainerisedInfrastructure {
 						.header("Authorization", "Bearer " + tokenFor(MEMBER))
 						.contentType(org.springframework.http.MediaType.APPLICATION_JSON)
 						.content("""
-								{ "userId": "usr_admin", "institutionId": "inst_dsu",
+								{ "userId": "usr_admin", "institutionId": "inst_ucl",
 								  "roles": ["ADMIN"], "type": "INDIVIDUAL" }
 								"""))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.userId").value("usr_6712ab"))
-				.andExpect(jsonPath("$.institutionId").value("inst_imperial"))
+				.andExpect(jsonPath("$.institutionId").value("inst_7f3"))
 				.andExpect(jsonPath("$.type").value("INSTITUTION"))
 				.andExpect(jsonPath("$.roles[0]").value("MEMBER"));
 	}
@@ -206,7 +186,7 @@ class AuthMeTest extends ContainerisedInfrastructure {
 	void aSecondTokenInAnotherHeaderIsNotConsulted() throws Exception {
 		// An ADMIN token in a header nobody reads must not escalate a MEMBER request. Only the
 		// Authorization header is an authentication input.
-		TnfUser admin = new TnfUser("usr_b920fe", UserType.INSTITUTION, "inst_imperial",
+		TnfUser admin = new TnfUser("usr_b920fe", UserType.INSTITUTION, "inst_7f3",
 				List.of("MEMBER", "ADMIN"), List.of("col_medicine"));
 
 		mockMvc.perform(get("/api/v1/auth/me")

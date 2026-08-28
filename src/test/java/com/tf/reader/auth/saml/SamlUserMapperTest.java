@@ -30,11 +30,11 @@ class SamlUserMapperTest {
 
 	@Test
 	void mapsAnAssertionToTheTnfUserForThatInstitution() {
-		TnfUser user = mapper.map(assertion("john.doe@example.com"), "inst_imperial");
+		TnfUser user = mapper.map(assertion("john.doe@example.com"), "inst_7f3");
 
 		assertThat(user.userId()).isEqualTo("usr_6712ab");
 		assertThat(user.type()).isEqualTo(UserType.INSTITUTION);
-		assertThat(user.institutionId()).isEqualTo("inst_imperial");
+		assertThat(user.institutionId()).isEqualTo("inst_7f3");
 		assertThat(user.roles()).containsExactly("MEMBER");
 		assertThat(user.collections()).containsExactly("col_medicine");
 	}
@@ -45,22 +45,22 @@ class SamlUserMapperTest {
 		// institution recovered from our own transaction differs.
 		Saml2ResponseAssertionAccessor sameAssertion = assertion("john.doe@example.com");
 
-		TnfUser imperial = mapper.map(sameAssertion, "inst_imperial");
-		TnfUser dsu = mapper.map(sameAssertion, "inst_dsu");
-		TnfUser xyz = mapper.map(sameAssertion, "inst_xyz");
+		TnfUser imperial = mapper.map(sameAssertion, "inst_7f3");
+		TnfUser dsu = mapper.map(sameAssertion, "inst_ucl");
+		TnfUser xyz = mapper.map(sameAssertion, "inst_leeds");
 
 		assertThat(List.of(imperial.userId(), dsu.userId(), xyz.userId()))
 				.containsExactly("usr_6712ab", "usr_8c14de", "usr_3f81ab")
 				.doesNotHaveDuplicates();
 		assertThat(List.of(imperial.institutionId(), dsu.institutionId(), xyz.institutionId()))
-				.containsExactly("inst_imperial", "inst_dsu", "inst_xyz");
+				.containsExactly("inst_7f3", "inst_ucl", "inst_leeds");
 		assertThat(imperial.collections()).isNotEqualTo(dsu.collections());
 	}
 
 	@Test
 	void differentIdentitiesAtOneInstitutionResolveToDifferentUsers() {
-		TnfUser john = mapper.map(assertion("john.doe@example.com"), "inst_imperial");
-		TnfUser jane = mapper.map(assertion("jane.roe@example.com"), "inst_imperial");
+		TnfUser john = mapper.map(assertion("john.doe@example.com"), "inst_7f3");
+		TnfUser jane = mapper.map(assertion("jane.roe@example.com"), "inst_7f3");
 
 		assertThat(john.userId()).isNotEqualTo(jane.userId());
 		assertThat(jane.roles()).contains("ADMIN");
@@ -69,7 +69,7 @@ class SamlUserMapperTest {
 	@Test
 	void refusesAnIdentityWithNoMembershipAtThatInstitution() {
 		// Jane exists, but only at Imperial. Authenticated is not the same as provisioned.
-		assertThatThrownBy(() -> mapper.map(assertion("jane.roe@example.com"), "inst_dsu"))
+		assertThatThrownBy(() -> mapper.map(assertion("jane.roe@example.com"), "inst_ucl"))
 				.isInstanceOf(ApiException.class)
 				.extracting(thrown -> ((ApiException) thrown).getCode())
 				.isEqualTo(ErrorCode.USER_NOT_PROVISIONED);
@@ -79,7 +79,7 @@ class SamlUserMapperTest {
 	void refusesAnIdentityUnknownToUsEntirely() {
 		// A valid SAML login by somebody we have never provisioned is still a refusal. The IdP
 		// vouching for an identity does not make it one of our users.
-		assertThatThrownBy(() -> mapper.map(assertion("stranger@example.com"), "inst_imperial"))
+		assertThatThrownBy(() -> mapper.map(assertion("stranger@example.com"), "inst_7f3"))
 				.isInstanceOf(ApiException.class)
 				.extracting(thrown -> ((ApiException) thrown).getCode())
 				.isEqualTo(ErrorCode.USER_NOT_PROVISIONED);
@@ -95,7 +95,7 @@ class SamlUserMapperTest {
 
 	@Test
 	void refusesAnAssertionWithNoIdentityAttributeAtAll() {
-		assertThatThrownBy(() -> mapper.map(new StubAssertion("", Map.of()), "inst_imperial"))
+		assertThatThrownBy(() -> mapper.map(new StubAssertion("", Map.of()), "inst_7f3"))
 				.isInstanceOf(ApiException.class)
 				.extracting(thrown -> ((ApiException) thrown).getCode())
 				.isEqualTo(ErrorCode.SAML_AUTHENTICATION_FAILED);
@@ -108,12 +108,12 @@ class SamlUserMapperTest {
 		Saml2ResponseAssertionAccessor nameIdOnly =
 				new StubAssertion("john.doe@example.com", Map.of());
 
-		assertThat(mapper.map(nameIdOnly, "inst_imperial").userId()).isEqualTo("usr_6712ab");
+		assertThat(mapper.map(nameIdOnly, "inst_7f3").userId()).isEqualTo("usr_6712ab");
 	}
 
 	@Test
 	void emailCaseDoesNotChangeTheUser() {
-		assertThat(mapper.map(assertion("John.Doe@Example.com"), "inst_imperial").userId())
+		assertThat(mapper.map(assertion("John.Doe@Example.com"), "inst_7f3").userId())
 				.isEqualTo("usr_6712ab");
 	}
 
@@ -125,13 +125,13 @@ class SamlUserMapperTest {
 		Saml2ResponseAssertionAccessor overreaching = new StubAssertion("john.doe@example.com",
 				Map.of(SamlUserMapper.EMAIL_CLAIM, List.of("john.doe@example.com"),
 						"userId", List.of("usr_admin"),
-						"institutionId", List.of("inst_dsu"),
+						"institutionId", List.of("inst_ucl"),
 						"roles", List.of("ADMIN")));
 
-		TnfUser user = mapper.map(overreaching, "inst_imperial");
+		TnfUser user = mapper.map(overreaching, "inst_7f3");
 
 		assertThat(user.userId()).isEqualTo("usr_6712ab");
-		assertThat(user.institutionId()).isEqualTo("inst_imperial");
+		assertThat(user.institutionId()).isEqualTo("inst_7f3");
 		assertThat(user.roles()).containsExactly("MEMBER");
 	}
 

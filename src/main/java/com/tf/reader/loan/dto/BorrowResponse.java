@@ -10,6 +10,8 @@ import java.time.Instant;
  */
 public record BorrowResponse(
 		String loanId,
+		String userId,
+		String institutionId,
 		String itemId,
 		String licenceModel,
 		String status,

@@ -30,20 +30,21 @@ public class MockUserRepository {
 	}
 
 	private static final Map<Membership, TnfUser> USERS = Map.of(
-			// The API Reference worked example. Same identity, three institutions, three users.
-			new Membership("john.doe@example.com", "inst_imperial"),
-			new TnfUser("usr_6712ab", UserType.INSTITUTION, "inst_imperial",
+			// Real institutions, from the institutions collection - see InstitutionLookup. Same
+			// identity, three institutions, three users.
+			new Membership("john.doe@example.com", "inst_7f3"),
+			new TnfUser("usr_6712ab", UserType.INSTITUTION, "inst_7f3",
 					List.of("MEMBER"), List.of("col_medicine")),
-			new Membership("john.doe@example.com", "inst_dsu"),
-			new TnfUser("usr_8c14de", UserType.INSTITUTION, "inst_dsu",
+			new Membership("john.doe@example.com", "inst_ucl"),
+			new TnfUser("usr_8c14de", UserType.INSTITUTION, "inst_ucl",
 					List.of("MEMBER"), List.of("col_engineering")),
-			new Membership("john.doe@example.com", "inst_xyz"),
-			new TnfUser("usr_3f81ab", UserType.INSTITUTION, "inst_xyz",
+			new Membership("john.doe@example.com", "inst_leeds"),
+			new TnfUser("usr_3f81ab", UserType.INSTITUTION, "inst_leeds",
 					List.of("MEMBER"), List.of("col_open")),
 			// A second identity at Imperial, so the mapping is visibly by identity and not by
 			// institution alone. Change the NameID in the mock IdP's assertion to reach it.
-			new Membership("jane.roe@example.com", "inst_imperial"),
-			new TnfUser("usr_b920fe", UserType.INSTITUTION, "inst_imperial",
+			new Membership("jane.roe@example.com", "inst_7f3"),
+			new TnfUser("usr_b920fe", UserType.INSTITUTION, "inst_7f3",
 					List.of("MEMBER", "ADMIN"), List.of("col_medicine", "col_engineering")));
 
 	/**

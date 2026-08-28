@@ -15,6 +15,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,6 +35,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.tf.reader.TestcontainersConfiguration;
+import com.tf.reader.auth.AuthTestInstitutions;
 import com.tf.reader.auth.authorization.AuthorizationService;
 import com.tf.reader.auth.model.CurrentUser;
 import com.tf.reader.auth.model.Role;
@@ -44,6 +46,7 @@ import com.tf.reader.auth.token.JwtProperties;
 import com.tf.reader.auth.token.JwtTokenService;
 import com.tf.reader.auth.transaction.AuthTransaction;
 import com.tf.reader.auth.transaction.AuthTransactionStore;
+import com.tf.reader.catalogue.repository.InstitutionRepository;
 import com.tf.reader.common.error.ApiException;
 import com.tf.reader.common.error.ErrorCode;
 
@@ -79,19 +82,27 @@ class EndToEndAuthFlowTest {
 	@Autowired
 	private AuthorizationService authorization;
 
+	@Autowired
+	private InstitutionRepository institutions;
+
+	@BeforeEach
+	void seedInstitutions() {
+		AuthTestInstitutions.seed(institutions);
+	}
+
 	// ───────────────────────────── the happy path, whole ─────────────────────────────
 
 	@Test
 	void aSamlIdentityBecomesAJwtBecomesACurrentUserWithoutDrifting() throws Exception {
 		// STEP 1 — the backend records which institution this sign-in is for.
-		AuthTransaction transaction = transactions.open("inst_imperial");
+		AuthTransaction transaction = transactions.open("inst_7f3");
 
 		// STEP 2+3 — a validated assertion plus that transaction produce a TnfUser and a token.
 		SamlLoginResult login =
 				samlAuthentication.complete(samlAuthentication("john.doe@example.com"), transaction.id());
 
 		assertThat(login.user().userId()).isEqualTo("usr_6712ab");
-		assertThat(login.user().institutionId()).isEqualTo("inst_imperial");
+		assertThat(login.user().institutionId()).isEqualTo("inst_7f3");
 		assertThat(login.token()).isNotBlank();
 
 		// STEP 4+5 — the same token, over HTTP, through the real filter chain to a controller.
@@ -111,10 +122,10 @@ class EndToEndAuthFlowTest {
 		CurrentUser asRequested = new CurrentUser(login.user().userId(), login.user().type(),
 				login.user().institutionId(), login.user().roles(), login.user().collections());
 		authorization.requireRole(asRequested, Role.MEMBER);
-		authorization.requireSameInstitution(asRequested, "inst_imperial");
+		authorization.requireSameInstitution(asRequested, "inst_7f3");
 		assertThatThrownBy(() -> authorization.requireRole(asRequested, Role.ADMIN))
 				.isInstanceOf(ApiException.class);
-		assertThatThrownBy(() -> authorization.requireSameInstitution(asRequested, "inst_dsu"))
+		assertThatThrownBy(() -> authorization.requireSameInstitution(asRequested, "inst_ucl"))
 				.isInstanceOf(ApiException.class);
 
 		// STEP 7 — the token handed back is usable, and the secret never appears in a response.
@@ -128,18 +139,18 @@ class EndToEndAuthFlowTest {
 		Authentication sameIdentity = samlAuthentication("john.doe@example.com");
 
 		SamlLoginResult imperial =
-				samlAuthentication.complete(sameIdentity, transactions.open("inst_imperial").id());
+				samlAuthentication.complete(sameIdentity, transactions.open("inst_7f3").id());
 		SamlLoginResult dsu =
-				samlAuthentication.complete(sameIdentity, transactions.open("inst_dsu").id());
+				samlAuthentication.complete(sameIdentity, transactions.open("inst_ucl").id());
 
 		assertThat(imperial.user().userId()).isNotEqualTo(dsu.user().userId());
 
 		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + imperial.token()))
 				.andExpect(jsonPath("$.userId").value("usr_6712ab"))
-				.andExpect(jsonPath("$.institutionId").value("inst_imperial"));
+				.andExpect(jsonPath("$.institutionId").value("inst_7f3"));
 		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + dsu.token()))
 				.andExpect(jsonPath("$.userId").value("usr_8c14de"))
-				.andExpect(jsonPath("$.institutionId").value("inst_dsu"));
+				.andExpect(jsonPath("$.institutionId").value("inst_ucl"));
 	}
 
 	// ───────────────────────────── the failure matrix ─────────────────────────────
@@ -149,9 +160,7 @@ class EndToEndAuthFlowTest {
 
 		@Test
 		void case2_unknownInstitutionCannotEvenStart() throws Exception {
-			mockMvc.perform(post("/api/v1/auth/saml/start")
-							.contentType(MediaType.APPLICATION_JSON)
-							.content("{\"institutionId\":\"inst_nowhere\"}"))
+			mockMvc.perform(post("/api/v1/auth/saml/start").param("institutionId", "inst_nowhere"))
 					.andExpect(status().isNotFound())
 					.andExpect(jsonPath("$.code").value("NOT_FOUND"));
 		}
@@ -159,7 +168,7 @@ class EndToEndAuthFlowTest {
 		@Test
 		void case3_anIdentityWithNoMembershipGetsNoToken() {
 			// Authenticated by the IdP is not provisioned by us: no token is minted at all.
-			String relayState = transactions.open("inst_imperial").id();
+			String relayState = transactions.open("inst_7f3").id();
 
 			assertThatThrownBy(() -> samlAuthentication.complete(
 					samlAuthentication("stranger@example.com"), relayState))
@@ -180,12 +189,12 @@ class EndToEndAuthFlowTest {
 
 		@Test
 		void case8and9_roleAndInstitutionRefusalsAreDistinguishable() {
-			CurrentUser member = new CurrentUser("usr_6712ab", UserType.INSTITUTION, "inst_imperial",
+			CurrentUser member = new CurrentUser("usr_6712ab", UserType.INSTITUTION, "inst_7f3",
 					List.of("MEMBER"), List.of("col_medicine"));
 
 			assertThatThrownBy(() -> authorization.requireRole(member, Role.ADMIN))
 					.extracting(t -> ((ApiException) t).getCode()).isEqualTo(ErrorCode.FORBIDDEN_ROLE);
-			assertThatThrownBy(() -> authorization.requireSameInstitution(member, "inst_dsu"))
+			assertThatThrownBy(() -> authorization.requireSameInstitution(member, "inst_ucl"))
 					.extracting(t -> ((ApiException) t).getCode()).isEqualTo(ErrorCode.WRONG_INSTITUTION);
 		}
 
@@ -195,7 +204,7 @@ class EndToEndAuthFlowTest {
 					List.of("SUBSCRIBER"), List.of("col_open"));
 
 			// Including against an unscoped resource, where null == null would have said yes.
-			for (String resource : List.of("inst_imperial", "inst_dsu", "inst_xyz")) {
+			for (String resource : List.of("inst_7f3", "inst_ucl", "inst_xyz")) {
 				assertThatThrownBy(() -> authorization.requireSameInstitution(individual, resource))
 						.extracting(t -> ((ApiException) t).getCode())
 						.isEqualTo(ErrorCode.WRONG_INSTITUTION);
@@ -211,19 +220,19 @@ class EndToEndAuthFlowTest {
 			mockMvc.perform(get("/api/v1/auth/me")
 							.header("Authorization", "Bearer " + token)
 							.queryParam("userId", "usr_admin")
-							.queryParam("institutionId", "inst_dsu")
+							.queryParam("institutionId", "inst_ucl")
 							.queryParam("roles", "ADMIN")
 							.queryParam("collections", "col_everything")
 							.header("X-User-Id", "usr_admin")
-							.header("X-Institution-Id", "inst_dsu")
+							.header("X-Institution-Id", "inst_ucl")
 							.header("X-Roles", "ADMIN")
 							.contentType(MediaType.APPLICATION_JSON)
 							.content("""
-									{"userId":"usr_admin","institutionId":"inst_dsu",
+									{"userId":"usr_admin","institutionId":"inst_ucl",
 									 "roles":["ADMIN"],"collections":["col_everything"]}"""))
 					.andExpect(status().isOk())
 					.andExpect(jsonPath("$.userId").value("usr_6712ab"))
-					.andExpect(jsonPath("$.institutionId").value("inst_imperial"))
+					.andExpect(jsonPath("$.institutionId").value("inst_7f3"))
 					.andExpect(jsonPath("$.roles[0]").value("MEMBER"))
 					.andExpect(jsonPath("$.roles", org.hamcrest.Matchers.hasSize(1)))
 					.andExpect(jsonPath("$.collections[0]").value("col_medicine"));
@@ -237,7 +246,7 @@ class EndToEndAuthFlowTest {
 
 		@Test
 		void aTransactionCannotBeCompletedTwice() {
-			AuthTransaction transaction = transactions.open("inst_imperial");
+			AuthTransaction transaction = transactions.open("inst_7f3");
 			Authentication identity = samlAuthentication("john.doe@example.com");
 			samlAuthentication.complete(identity, transaction.id());
 
@@ -264,10 +273,10 @@ class EndToEndAuthFlowTest {
 			// The institution is read from the transaction, so a DSU transaction can only ever
 			// produce the DSU membership - there is no input through which to ask for another.
 			SamlLoginResult login = samlAuthentication.complete(
-					samlAuthentication("john.doe@example.com"), transactions.open("inst_dsu").id());
+					samlAuthentication("john.doe@example.com"), transactions.open("inst_ucl").id());
 
-			assertThat(login.institution().institutionId()).isEqualTo("inst_dsu");
-			assertThat(login.user().institutionId()).isEqualTo("inst_dsu");
+			assertThat(login.institution().institutionId()).isEqualTo("inst_ucl");
+			assertThat(login.user().institutionId()).isEqualTo("inst_ucl");
 		}
 
 	}
@@ -302,7 +311,7 @@ class EndToEndAuthFlowTest {
 			// requireSameInstitution for that institution, because CurrentUser reads membership
 			// from the id alone.
 			assertRefusal(signed(Map.of("userId", "usr_9f01cd", "type", "INDIVIDUAL",
-					"institutionId", "inst_imperial", "roles", List.of("SUBSCRIBER"),
+					"institutionId", "inst_7f3", "roles", List.of("SUBSCRIBER"),
 					"collections", List.of("col_open"))), "TOKEN_INVALID");
 			assertRefusal(signed(Map.of("userId", "usr_6712ab", "type", "INSTITUTION",
 					"roles", List.of("MEMBER"), "collections", List.of("col_medicine"))),
@@ -357,14 +366,14 @@ class EndToEndAuthFlowTest {
 
 	private String validToken() {
 		return samlAuthentication.complete(samlAuthentication("john.doe@example.com"),
-				transactions.open("inst_imperial").id()).token();
+				transactions.open("inst_7f3").id()).token();
 	}
 
 	private String expiredToken() {
 		return JwtTokenService.forTest(SECRET, Duration.ofHours(1),
 				Clock.fixed(Instant.now().minus(Duration.ofHours(3)), ZoneOffset.UTC))
 				.issue(new com.tf.reader.auth.model.TnfUser("usr_6712ab", UserType.INSTITUTION,
-						"inst_imperial", List.of("MEMBER"), List.of("col_medicine")))
+						"inst_7f3", List.of("MEMBER"), List.of("col_medicine")))
 				.token();
 	}
 
@@ -372,7 +381,7 @@ class EndToEndAuthFlowTest {
 		return JwtTokenService.forTest("a-different-secret-of-sufficient-length-9876543210abc",
 				Duration.ofHours(1), Clock.systemUTC())
 				.issue(new com.tf.reader.auth.model.TnfUser("usr_6712ab", UserType.INSTITUTION,
-						"inst_imperial", List.of("MEMBER"), List.of("col_medicine")))
+						"inst_7f3", List.of("MEMBER"), List.of("col_medicine")))
 				.token();
 	}
 

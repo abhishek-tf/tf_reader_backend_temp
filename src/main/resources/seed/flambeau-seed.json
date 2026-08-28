@@ -1,0 +1,144 @@
+{
+  "loans": [
+    {
+      "_seedWhy": "ELITE, ACTIVE, holds one of item_42's two copies. Pair with loan_seed_b2 and hold_seed_c3/d4/e5 for a full queue scenario.",
+      "loanId": "loan_seed_a1",
+      "userId": "usr_a1",
+      "itemId": "item_42",
+      "institutionId": "inst_7f3",
+      "licenceModel": "ELITE",
+      "status": "ACTIVE",
+      "canPersist": false,
+      "leaseId": "lease_seed_a1",
+      "borrowedAt": "2026-08-20T09:00:00Z",
+      "dueAt": "2026-09-03T09:00:00Z"
+    },
+    {
+      "_seedWhy": "ELITE, RETURNED. Frees the second copy of item_42, which hold_seed_c3's OFFERED hold now occupies instead.",
+      "loanId": "loan_seed_b2",
+      "userId": "usr_b2",
+      "itemId": "item_42",
+      "institutionId": "inst_7f3",
+      "licenceModel": "ELITE",
+      "status": "RETURNED",
+      "canPersist": false,
+      "borrowedAt": "2026-08-15T09:00:00Z",
+      "dueAt": "2026-08-29T09:00:00Z",
+      "returnedAt": "2026-08-24T14:30:00Z"
+    },
+    {
+      "_seedWhy": "SUBSCRIPTION, ACTIVE, open-ended (dueAt null) — the ordinary unlimited-access case, for the dev-token default user.",
+      "loanId": "loan_seed_d9",
+      "userId": "usr_dev123",
+      "itemId": "item_env",
+      "institutionId": "inst_7f3",
+      "licenceModel": "SUBSCRIPTION",
+      "status": "ACTIVE",
+      "canPersist": true,
+      "borrowedAt": "2026-08-10T09:00:00Z"
+    },
+    {
+      "_seedWhy": "SUBSCRIPTION, EXPIRED — swept past its dueAt. Gives the loan-list and library-shelf endpoints a non-ACTIVE row to filter around.",
+      "loanId": "loan_seed_e1",
+      "userId": "usr_dev123",
+      "itemId": "item_dual",
+      "institutionId": "inst_7f3",
+      "licenceModel": "SUBSCRIPTION",
+      "status": "EXPIRED",
+      "canPersist": true,
+      "borrowedAt": "2026-07-01T09:00:00Z",
+      "dueAt": "2026-07-31T09:00:00Z",
+      "expiredAt": "2026-07-31T09:00:05Z"
+    },
+    {
+      "_seedWhy": "OPEN_ACCESS, ACTIVE, no institution (personal access). No lease, no due date, ever — the tier's whole point.",
+      "loanId": "loan_seed_f2",
+      "userId": "usr_f6",
+      "itemId": "item_ab6",
+      "institutionId": null,
+      "licenceModel": "OPEN_ACCESS",
+      "status": "ACTIVE",
+      "canPersist": true,
+      "borrowedAt": "2026-08-22T09:00:00Z"
+    }
+  ],
+
+  "holds": [
+    {
+      "_seedWhy": "OFFERED — promoted into the copy loan_seed_b2 freed. Not in the Redis queue ZSET (promoted readers leave the queue); the reconciler picks this up as a live offer on startup.",
+      "holdId": "hold_seed_c3",
+      "userId": "usr_c3",
+      "scope": "inst_7f3",
+      "itemId": "item_42",
+      "status": "OFFERED",
+      "ticket": 1,
+      "placedAt": "2026-08-21T09:00:00Z",
+      "offer": {
+        "offerId": "offer_seed_1",
+        "offeredAt": "2026-08-24T14:30:05Z",
+        "expiresAt": "2026-08-27T14:30:05Z",
+        "leaseToken": "lease_seed_c3"
+      }
+    },
+    {
+      "_seedWhy": "QUEUED, position 1 once c3 accepts or lapses. Second and third members of a 3-person line for a 2-copy title.",
+      "holdId": "hold_seed_d4",
+      "userId": "usr_d4",
+      "scope": "inst_7f3",
+      "itemId": "item_42",
+      "status": "QUEUED",
+      "ticket": 2,
+      "placedAt": "2026-08-22T09:00:00Z"
+    },
+    {
+      "_seedWhy": "QUEUED, position 2. Together with d4, gives GET /api/v1/holds real queueLength > 1 to render.",
+      "holdId": "hold_seed_e5",
+      "userId": "usr_e5",
+      "scope": "inst_7f3",
+      "itemId": "item_42",
+      "status": "QUEUED",
+      "ticket": 3,
+      "placedAt": "2026-08-23T09:00:00Z"
+    }
+  ],
+
+  "devices": [
+    {
+      "_seedWhy": "4 of the default cap of 5 already used, so a manual tester can immediately try the 5th (admitted) and 6th (403 DEVICE_LIMIT_REACHED) device without registering four first.",
+      "userId": "usr_dev123",
+      "devices": [
+        { "fingerprint": "fp_seed_phone", "firstSeenAt": "2026-08-01T09:00:00Z", "lastSeenAt": "2026-08-25T09:00:00Z" },
+        { "fingerprint": "fp_seed_tablet", "firstSeenAt": "2026-08-05T09:00:00Z", "lastSeenAt": "2026-08-24T09:00:00Z" },
+        { "fingerprint": "fp_seed_laptop", "firstSeenAt": "2026-08-10T09:00:00Z", "lastSeenAt": "2026-08-20T09:00:00Z" },
+        { "fingerprint": "fp_seed_stale", "firstSeenAt": "2026-01-01T09:00:00Z", "lastSeenAt": "2026-02-01T09:00:00Z" }
+      ]
+    },
+    {
+      "_seedWhy": "A reader with a single device — the ordinary case, for contrast against usr_dev123's near-full cap.",
+      "userId": "usr_a1",
+      "devices": [
+        { "fingerprint": "fp_seed_a1_phone", "firstSeenAt": "2026-08-20T09:00:00Z", "lastSeenAt": "2026-08-25T09:00:00Z" }
+      ]
+    }
+  ],
+
+  "changelog": [
+    {
+      "_seedWhy": "A short realistic history for the dev-token default user, so GET /api/v1/loans/changes has more than one page to demonstrate ?since=/?size= paging against.",
+      "userId": "usr_dev123",
+      "entries": [
+        { "reason": "LOAN_CREATED", "itemId": "item_env", "loanId": "loan_seed_d9", "occurredAt": "2026-08-10T09:00:00Z" },
+        { "reason": "LOAN_CREATED", "itemId": "item_dual", "loanId": "loan_seed_e1", "occurredAt": "2026-07-01T09:00:00Z" },
+        { "reason": "LOAN_EXPIRED", "itemId": "item_dual", "loanId": "loan_seed_e1", "occurredAt": "2026-07-31T09:00:05Z" }
+      ]
+    },
+    {
+      "_seedWhy": "A reader whose hold was promoted then accepted-in-waiting — exercises HOLD_PLACED/HOLD_PROMOTED in the feed.",
+      "userId": "usr_c3",
+      "entries": [
+        { "reason": "HOLD_PLACED", "itemId": "item_42", "holdId": "hold_seed_c3", "occurredAt": "2026-08-21T09:00:00Z" },
+        { "reason": "HOLD_PROMOTED", "itemId": "item_42", "holdId": "hold_seed_c3", "occurredAt": "2026-08-24T14:30:05Z" }
+      ]
+    }
+  ]
+}

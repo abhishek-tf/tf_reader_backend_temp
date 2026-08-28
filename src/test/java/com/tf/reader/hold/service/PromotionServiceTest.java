@@ -3,6 +3,7 @@ package com.tf.reader.hold.service;
 import com.tf.reader.catalogue.api.EntitlementQuery;
 import com.tf.reader.hold.repository.HoldRepository;
 import com.tf.reader.hold.repository.HoldWrites;
+import com.tf.reader.library.api.ChangeLog;
 import com.tf.reader.reading.api.CopyLease;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,7 @@ class PromotionServiceTest {
     private final CopyLease lease = mock(CopyLease.class);
     private final EntitlementQuery entitlements = mock(EntitlementQuery.class);
     private final HoldProperties props = new HoldProperties();
+    private final ChangeLog changeLog = mock(ChangeLog.class);
     private final Clock clock = Clock.fixed(Instant.parse("2026-08-17T09:00:00Z"), ZoneOffset.UTC);
 
     @SuppressWarnings("unchecked")
@@ -44,7 +46,7 @@ class PromotionServiceTest {
     void setUp() {
         when(redis.opsForValue()).thenReturn(valueOps);
         when(redis.opsForZSet()).thenReturn(zsetOps);
-        promotion = new PromotionService(holds, writes, redis, lease, entitlements, props, clock);
+        promotion = new PromotionService(holds, writes, redis, lease, entitlements, props, changeLog, clock);
     }
 
     @Test

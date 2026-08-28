@@ -34,4 +34,7 @@ public interface HoldRepository extends MongoRepository<Hold, String> {
     // Candidates for the sweep. The guard that actually decides whether one
     // is truly lapsed happens per-document in HoldWrites#expireIfLapsed.
     List<Hold> findByStatusAndOfferExpiresAtBefore(HoldStatus status, Instant instant);
+
+    // Every OFFERED hold, any item — the reconciler's rebuild read (LiveOfferQuery).
+    List<Hold> findByStatus(HoldStatus status);
 }

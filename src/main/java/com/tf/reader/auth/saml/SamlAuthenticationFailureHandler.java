@@ -5,22 +5,20 @@ import java.io.IOException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-import org.springframework.http.MediaType;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.stereotype.Component;
 
 import com.tf.reader.common.error.ErrorCode;
-import com.tf.reader.common.error.ErrorResponse;
 import com.tf.reader.common.error.TraceIds;
 
-import tools.jackson.databind.json.JsonMapper;
-
 /**
- * Turns a rejected SAML response into our canonical error body.
+ * Turns a rejected SAML response into a redirect back to the app.
  *
- * <p>Spring Security's default would redirect to an error page, which is useless to an API
- * client and hides the refusal behind a 302.
+ * <p>Spring Security's own default redirects to an error page; a JSON body, which is what this
+ * class wrote before the deep-link callback existed, is just as useless here - the browser is
+ * mid-redirect from the IdP, not a fetch call that could read one. Either way the only thing that
+ * can act on the refusal is the app itself, at {@link SamlAuthenticationSuccessHandler#DEEP_LINK_CALLBACK}.
  *
  * <p>The reason is logged but never returned. A caller learns that sign-in failed, not which
  * check failed - "signature did not verify" and "audience did not match" are useful to an
@@ -32,22 +30,13 @@ public class SamlAuthenticationFailureHandler implements AuthenticationFailureHa
 	private static final org.slf4j.Logger log =
 			org.slf4j.LoggerFactory.getLogger(SamlAuthenticationFailureHandler.class);
 
-	private final JsonMapper jsonMapper;
-
-	public SamlAuthenticationFailureHandler(JsonMapper jsonMapper) {
-		this.jsonMapper = jsonMapper;
-	}
-
 	@Override
 	public void onAuthenticationFailure(HttpServletRequest request, HttpServletResponse response,
 			AuthenticationException exception) throws IOException {
 		String traceId = TraceIds.newTraceId();
 		log.warn("SAML authentication rejected [traceId={}]: {}", traceId, exception.getMessage());
 
-		ErrorResponse body = ErrorResponse.of(ErrorCode.SAML_AUTHENTICATION_FAILED,
-				"The SAML response could not be validated.", request.getRequestURI(), traceId);
-		response.setStatus(ErrorCode.SAML_AUTHENTICATION_FAILED.getStatus().value());
-		response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-		response.getWriter().write(jsonMapper.writeValueAsString(body));
+		response.sendRedirect(SamlAuthenticationSuccessHandler.DEEP_LINK_CALLBACK
+				+ "?error=" + ErrorCode.SAML_AUTHENTICATION_FAILED.name());
 	}
 }

@@ -8,6 +8,9 @@ import com.tf.reader.hold.entity.HoldStatus;
 import com.tf.reader.hold.entity.Offer;
 import com.tf.reader.hold.repository.HoldRepository;
 import com.tf.reader.hold.repository.HoldWrites;
+import com.tf.reader.library.api.ChangeLog;
+import com.tf.reader.library.api.ChangeReason;
+import com.tf.reader.library.api.ChangeRecord;
 import com.tf.reader.reading.api.CopyLease;
 import com.tf.reader.reading.api.LeaseHandle;
 import org.slf4j.Logger;
@@ -47,16 +50,19 @@ public class PromotionService {
     private final CopyLease lease;
     private final EntitlementQuery entitlements;
     private final HoldProperties props;
+    private final ChangeLog changeLog;
     private final Clock clock;
 
     public PromotionService(HoldRepository holds, HoldWrites writes, StringRedisTemplate redis,
-                             CopyLease lease, EntitlementQuery entitlements, HoldProperties props, Clock clock) {
+                             CopyLease lease, EntitlementQuery entitlements, HoldProperties props,
+                             ChangeLog changeLog, Clock clock) {
         this.holds = holds;
         this.writes = writes;
         this.redis = redis;
         this.lease = lease;
         this.entitlements = entitlements;
         this.props = props;
+        this.changeLog = changeLog;
         this.clock = clock;
     }
 
@@ -138,7 +144,7 @@ public class PromotionService {
         }
 
         redis.opsForZSet().remove(queueKey, member); // not waiting any more — they're holding
-        log.info("HOLD_PROMOTED user={} item={}", nextUserId, itemId);
+        changeLog.record(ChangeRecord.forHold(nextUserId, ChangeReason.HOLD_PROMOTED, itemId, hold.getHoldId(), now));
         return true;
     }
 }

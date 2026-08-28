@@ -51,6 +51,15 @@ ContentGrant grant(ContentGrantRequest request);
 to scrub. Open access is never encrypted either, because a key handed to anonymous readers protects
 nothing.
 
+**Overridden for one dev fixture by t4targaryen, 2026-08-25.** `dev-sample-audio-encrypted`
+(`ContentAccessGrantImpl`'s `AUDIO_ENCRYPTED_SMALL_FIXTURE`) is real encrypted audio, deliberately.
+t4targaryen's client already decrypts every format whole-file into RAM under one shared budget
+(`MAX_DECRYPTED_BYTES`); treating audio as "just another encrypted format" costs them nothing they
+weren't already paying, below that cap. This does **not** revisit the reasoning above — it stays
+true for anything that needs to seek during a from-scratch decrypt of something long, which is
+exactly why this fixture stays small. Every other audio item is still covered by the rule; see
+`DemoDataSeederTest.audioIsNeverEncrypted`'s one named exclusion.
+
 ## Four facts that are easy to get wrong
 
 1. **wokay serves no content over HTTP.** Every acquisition link in every feed points at flambeau,

@@ -3,6 +3,7 @@ package com.tf.reader.auth.saml;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -67,7 +68,7 @@ class SamlSecurityEdgeCaseTest extends ContainerisedInfrastructure {
 		// A captured ACS POST, resubmitted. The response is not signed by the IdP so it never gets
 		// as far as the transaction, but the shape of the refusal must not change between attempts
 		// - an endpoint that answered differently the second time would be leaking state.
-		AuthTransaction transaction = transactions.open("inst_imperial");
+		AuthTransaction transaction = transactions.open("inst_7f3");
 		MockHttpServletRequestBuilder replay = acs(unsignedResponse(), transaction.id());
 
 		assertRefused(replay);
@@ -77,7 +78,7 @@ class SamlSecurityEdgeCaseTest extends ContainerisedInfrastructure {
 	@Test
 	void aRelayStateAlreadySpentCannotBeUsedAgain() throws Exception {
 		// Spend it through the store, exactly as a completed sign-in would, then try to present it.
-		AuthTransaction transaction = transactions.open("inst_imperial");
+		AuthTransaction transaction = transactions.open("inst_7f3");
 		assertThat(transactions.consume(transaction.id())).isPresent();
 
 		assertRefused(acs(unsignedResponse(), transaction.id()));
@@ -111,7 +112,7 @@ class SamlSecurityEdgeCaseTest extends ContainerisedInfrastructure {
 
 	@Test
 	void everyShapeOfBadSamlResponseIsRefusedWithoutAServerError() throws Exception {
-		String relayState = transactions.open("inst_imperial").id();
+		String relayState = transactions.open("inst_7f3").id();
 
 		for (String response : List.of(
 				"",                                              // empty
@@ -127,12 +128,9 @@ class SamlSecurityEdgeCaseTest extends ContainerisedInfrastructure {
 
 	@Test
 	void aCallbackWithNoSamlResponseAtAllIsRefused() throws Exception {
-		int status = mockMvc.perform(post(ACS)
-						.contentType(MediaType.APPLICATION_FORM_URLENCODED)
-						.param("RelayState", transactions.open("inst_imperial").id()))
-				.andReturn().getResponse().getStatus();
-
-		assertThat(status).isBetween(400, 499);
+		assertRefused(post(ACS)
+				.contentType(MediaType.APPLICATION_FORM_URLENCODED)
+				.param("RelayState", transactions.open("inst_7f3").id()));
 	}
 
 	@Test
@@ -142,7 +140,7 @@ class SamlSecurityEdgeCaseTest extends ContainerisedInfrastructure {
 		String huge = Base64.getEncoder().encodeToString("A".repeat(512 * 1024)
 				.getBytes(StandardCharsets.UTF_8));
 
-		assertRefused(acs(huge, transactions.open("inst_imperial").id()));
+		assertRefused(acs(huge, transactions.open("inst_7f3").id()));
 	}
 
 	@Test
@@ -152,7 +150,7 @@ class SamlSecurityEdgeCaseTest extends ContainerisedInfrastructure {
 		// all. Either way it must not authenticate anybody.
 		String tampered = base64(samlResponseXml().replace("john.doe@example.com", "jane.roe@example.com"));
 
-		assertRefused(acs(tampered, transactions.open("inst_imperial").id()));
+		assertRefused(acs(tampered, transactions.open("inst_7f3").id()));
 	}
 
 	@Test
@@ -163,8 +161,8 @@ class SamlSecurityEdgeCaseTest extends ContainerisedInfrastructure {
 		String wrongIssuer = base64(samlResponseXml().replace("saml-mock", "attacker.example.com"));
 		String wrongAudience = base64(samlResponseXml().replace("tf-reader-sp", "some-other-app"));
 
-		assertRefused(acs(wrongIssuer, transactions.open("inst_imperial").id()));
-		assertRefused(acs(wrongAudience, transactions.open("inst_imperial").id()));
+		assertRefused(acs(wrongIssuer, transactions.open("inst_7f3").id()));
+		assertRefused(acs(wrongAudience, transactions.open("inst_7f3").id()));
 	}
 
 	// ───────────── the institution is never the client's to choose ─────────────
@@ -178,20 +176,20 @@ class SamlSecurityEdgeCaseTest extends ContainerisedInfrastructure {
 		// This asserts the refusal is unchanged by any of it; the positive half - that a DSU
 		// transaction can only ever produce the DSU membership - is proven with real beans in
 		// SamlAuthenticationServiceTest and EndToEndAuthFlowTest.
-		AuthTransaction transaction = transactions.open("inst_dsu");
+		AuthTransaction transaction = transactions.open("inst_ucl");
 
 		assertRefused(post(ACS)
 				.contentType(MediaType.APPLICATION_FORM_URLENCODED)
 				.param("SAMLResponse", unsignedResponse())
 				.param("RelayState", transaction.id())
 				// body
-				.param("institutionId", "inst_imperial")
-				.param("institution", "inst_imperial")
+				.param("institutionId", "inst_7f3")
+				.param("institution", "inst_7f3")
 				// query string
-				.queryParam("institutionId", "inst_imperial")
+				.queryParam("institutionId", "inst_7f3")
 				// headers
-				.header("X-Institution-Id", "inst_imperial")
-				.header("X-Tenant", "inst_imperial"));
+				.header("X-Institution-Id", "inst_7f3")
+				.header("X-Tenant", "inst_7f3"));
 	}
 
 	@Test
@@ -233,7 +231,7 @@ class SamlSecurityEdgeCaseTest extends ContainerisedInfrastructure {
 
 	@Test
 	void theEntryPointRefusesAnUnknownRegistrationWithoutRedirecting() throws Exception {
-		for (String registration : List.of("inst_imperial", "tf-reader-sp", "../tf-reader", "")) {
+		for (String registration : List.of("inst_7f3", "tf-reader-sp", "../tf-reader", "")) {
 			var result = mockMvc.perform(get("/saml2/authenticate")
 					.queryParam("registrationId", registration)).andReturn();
 
@@ -247,7 +245,7 @@ class SamlSecurityEdgeCaseTest extends ContainerisedInfrastructure {
 		// The ACS needs a session for InResponseTo. Whatever happens next, that session must not
 		// survive to authenticate /api/** - see StatelessApiTest for the bug this guards.
 		MockHttpSession session = new MockHttpSession();
-		mockMvc.perform(acs(unsignedResponse(), transactions.open("inst_imperial").id())
+		mockMvc.perform(acs(unsignedResponse(), transactions.open("inst_7f3").id())
 				.session(session));
 
 		mockMvc.perform(get("/api/v1/auth/me").session(session))
@@ -257,16 +255,16 @@ class SamlSecurityEdgeCaseTest extends ContainerisedInfrastructure {
 
 	// ───────────────────────────── helpers ─────────────────────────────
 
-	/** Every refusal looks the same: 401, our error shape, one code, and no identity leaked. */
+	/**
+	 * Every refusal looks the same: a redirect back to the app carrying one error code and
+	 * nothing else - no identity, no institution, no token, because the browser here is
+	 * mid-redirect from the IdP and a JSON body would go unread.
+	 */
 	private void assertRefused(MockHttpServletRequestBuilder request) throws Exception {
 		mockMvc.perform(request)
-				.andExpect(status().isUnauthorized())
-				.andExpect(jsonPath("$.code").value("SAML_AUTHENTICATION_FAILED"))
-				.andExpect(jsonPath("$.traceId").isNotEmpty())
-				// Nothing about who anybody is, and nothing about what failed.
-				.andExpect(jsonPath("$.token").doesNotExist())
-				.andExpect(jsonPath("$.user").doesNotExist())
-				.andExpect(jsonPath("$.institution").doesNotExist());
+				.andExpect(status().is3xxRedirection())
+				.andExpect(header().string("Location",
+						"tfreader://auth/callback?error=SAML_AUTHENTICATION_FAILED"));
 	}
 
 	private MockHttpServletRequestBuilder acs(String samlResponse, String relayState) {

@@ -11,12 +11,12 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
-import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
@@ -27,10 +27,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import com.tf.reader.TestcontainersConfiguration;
+import com.tf.reader.auth.AuthTestInstitutions;
 import com.tf.reader.auth.model.TnfUser;
 import com.tf.reader.auth.model.UserType;
 import com.tf.reader.auth.token.JwtProperties;
 import com.tf.reader.auth.token.JwtTokenService;
+import com.tf.reader.catalogue.repository.InstitutionRepository;
 
 /**
  * The API authenticates from a bearer token and from nothing else.
@@ -55,10 +57,18 @@ class StatelessApiTest {
 	static final String SECRET = "a-test-only-signing-secret-of-sufficient-length-0123456789";
 
 	private static final TnfUser MEMBER = new TnfUser("usr_6712ab", UserType.INSTITUTION,
-			"inst_imperial", List.of("MEMBER"), List.of("col_medicine"));
+			"inst_7f3", List.of("MEMBER"), List.of("col_medicine"));
 
 	@Autowired
 	private MockMvc mockMvc;
+
+	@Autowired
+	private InstitutionRepository institutions;
+
+	@BeforeEach
+	void seedInstitutions() {
+		AuthTestInstitutions.seed(institutions);
+	}
 
 	@Test
 	void aSamlSessionCannotStandInForABearerTokenOnAuthMe() throws Exception {
@@ -101,8 +111,7 @@ class StatelessApiTest {
 	@Test
 	void theOpenSignInRouteCreatesNoSessionEither() throws Exception {
 		MvcResult result = mockMvc.perform(post("/api/v1/auth/saml/start")
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("{\"institutionId\":\"inst_imperial\"}"))
+						.param("institutionId", "inst_7f3"))
 				.andExpect(status().isOk())
 				.andReturn();
 

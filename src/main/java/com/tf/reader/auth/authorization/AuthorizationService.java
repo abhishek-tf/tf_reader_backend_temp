@@ -95,7 +95,7 @@ public class AuthorizationService {
 					"This resource carries no institution to check against.");
 		}
 		if (!currentUser.institutionId().equals(resourceInstitutionId)) {
-			// Does not name the resource's institution: whether inst_dsu holds a given item is
+			// Does not name the resource's institution: whether inst_ucl holds a given item is
 			// not something a member of another institution should learn from an error message.
 			throw new ApiException(ErrorCode.WRONG_INSTITUTION,
 					"This resource belongs to another institution.");

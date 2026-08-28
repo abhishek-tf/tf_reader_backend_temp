@@ -15,6 +15,9 @@ import com.tf.reader.library.dto.LibraryOffer;
 import com.tf.reader.library.dto.LibraryResponse;
 import com.tf.reader.library.support.ReaderIdentity;
 import com.tf.reader.loan.api.ActiveLoanQuery;
+import com.tf.reader.loan.api.ActiveLoanView;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Builds the library response from loans, holds and the change feed.
@@ -26,10 +29,11 @@ import com.tf.reader.loan.api.ActiveLoanQuery;
  * <p>The response shape never changed while those two seams landed weeks apart, which is what let
  * the screen be built once rather than twice.
  */
+@Slf4j
 @Service
 public class LibraryAssembler {
 
-	/** Every row {@code ActiveLoanQuery} returns is live by definition, so the wire status is fixed. */
+	/** The only loan status a shelf may show. Anything else means the loan seam broke its contract. */
 	private static final String ACTIVE = "ACTIVE";
 
 	private final ChangeFeedService changeFeed;
@@ -69,25 +73,49 @@ public class LibraryAssembler {
 	 * {@code dueAt} is excluded — so the shelf never shows a loan the reader has effectively lost,
 	 * even in the window before the expiry sweep runs.
 	 *
-	 * <p><b>{@code status} is hard-coded rather than read.</b> {@code ActiveLoanView} carries no
-	 * status field, and it does not need one: every row this seam returns is live by definition.
-	 *
-	 * <p><b>{@code borrowedAt} has no source, so it is omitted.</b> {@code ActiveLoanView} does not
-	 * publish it, and inventing a timestamp for a field the app may render is worse than leaving it
-	 * out. The frozen {@code LibraryResponse} shape has the field, so this is a gap to close with the
-	 * loan lane — either add it to the view, or drop it from the response.
+	 * <p>{@code status} and {@code borrowedAt} are both read from the view since D-026. Before that
+	 * the view published neither: status was hard-coded here and {@code borrowedAt} was omitted
+	 * entirely, which left the frozen response shape advertising a field nothing could populate.
 	 */
 	private List<LibraryLoan> loansFor(ReaderIdentity reader) {
 		return activeLoans.findAllFor(reader.userId()).stream()
+				.filter(loan -> live(loan, reader))
 				.map(loan -> new LibraryLoan(
 						loan.loanId(),
 						loan.itemId(),
 						loan.licenceModel(),
-						ACTIVE,
-						null,
+						loan.status(),
+						loan.borrowedAt(),
 						loan.dueAt(),
 						loan.canPersist()))
 				.toList();
+	}
+
+	/**
+	 * Drops anything the loan seam returns that is not actually live, and says so loudly.
+	 *
+	 * <p><b>Why this guard exists at all.</b> Until D-026 the wire status was hard-coded here, so a
+	 * closed loan could not reach the shelf by construction. Reading {@code status} from the view is
+	 * better — one source of truth — but it trades that guarantee for trust: if {@code findAllFor}
+	 * ever stops filtering, whatever it returns is what the reader sees.
+	 *
+	 * <p><b>Why it drops rather than throws.</b> A returned or expired loan rendered as one the
+	 * reader still holds is the actively harmful case — they tap it and get a refusal from the read
+	 * broker instead of a book. Failing the whole request would replace one wrong row with a blank
+	 * screen, which is worse for a reader who has nine other books.
+	 *
+	 * <p>Logged at error rather than warn because this can only happen if the seam broke its own
+	 * contract, and a silently shorter shelf reads to the reader as "I have fewer books than I
+	 * thought" — the kind of thing nobody reports and nobody finds.
+	 */
+	private static boolean live(ActiveLoanView loan, ReaderIdentity reader) {
+		if (ACTIVE.equals(loan.status())) {
+			return true;
+		}
+		log.error("ActiveLoanQuery returned a non-live loan; dropped from the shelf. "
+				+ "reader={} loan={} item={} status={}",
+				reader.userId(), loan.loanId(), loan.itemId(), loan.status());
+		return false;
 	}
 
 	/**

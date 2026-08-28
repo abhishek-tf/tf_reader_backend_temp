@@ -38,10 +38,10 @@ class OidcUserMapperTest {
 		// reason the mapper reads a claim that may be a list rather than calling getClaimAsString.
 		TnfUser user = mapper.map(idToken(Map.of(
 				"emails", List.of("john.doe@example.com"),
-				"oid", "b2c-object-id")), "inst_imperial");
+				"oid", "b2c-object-id")), "inst_7f3");
 
 		assertThat(user.userId()).isEqualTo("usr_6712ab");
-		assertThat(user.institutionId()).isEqualTo("inst_imperial");
+		assertThat(user.institutionId()).isEqualTo("inst_7f3");
 		assertThat(user.type()).isEqualTo(UserType.INSTITUTION);
 		assertThat(user.roles()).containsExactly("MEMBER");
 		assertThat(user.collections()).containsExactly("col_medicine");
@@ -50,7 +50,7 @@ class OidcUserMapperTest {
 	@Test
 	void aPlainEmailClaimWorksToo() {
 		// Entra External ID and the Microsoft identity platform emit a string, not an array.
-		assertThat(mapper.map(idToken(Map.of("email", "john.doe@example.com")), "inst_dsu").userId())
+		assertThat(mapper.map(idToken(Map.of("email", "john.doe@example.com")), "inst_ucl").userId())
 				.isEqualTo("usr_8c14de");
 	}
 
@@ -61,7 +61,7 @@ class OidcUserMapperTest {
 		TnfUser user = mapper.map(idToken(Map.of(
 				"emails", List.of("jane.roe@example.com"),
 				"email", "john.doe@example.com",
-				"preferred_username", "someone.else@example.com")), "inst_imperial");
+				"preferred_username", "someone.else@example.com")), "inst_7f3");
 
 		assertThat(user.userId()).isEqualTo("usr_b920fe");
 	}
@@ -73,7 +73,7 @@ class OidcUserMapperTest {
 		assertThat(mapper.map(idToken(Map.of(
 				"emails", List.of(),
 				"email", "   ",
-				"preferred_username", "john.doe@example.com")), "inst_xyz").userId())
+				"preferred_username", "john.doe@example.com")), "inst_leeds").userId())
 				.isEqualTo("usr_3f81ab");
 	}
 
@@ -84,7 +84,7 @@ class OidcUserMapperTest {
 				OidcProperties.withClaims(
 						new OidcProperties.Claims(List.of("mail"), List.of("uid"))));
 
-		assertThat(custom.map(idToken(Map.of("mail", "john.doe@example.com")), "inst_imperial")
+		assertThat(custom.map(idToken(Map.of("mail", "john.doe@example.com")), "inst_7f3")
 				.userId()).isEqualTo("usr_6712ab");
 		assertThat(custom.resolveSubject(idToken(Map.of("uid", "u-1", "oid", "ignored"))))
 				.isEqualTo("u-1");
@@ -94,7 +94,7 @@ class OidcUserMapperTest {
 	void theEmailIsFoldedByTheRepositoryNotByTheClaim() {
 		// B2C is free to vary the case of an address it round-trips. The repository lower-cases;
 		// this pins that a mixed-case claim still finds the seeded user.
-		assertThat(mapper.map(idToken(Map.of("email", "John.Doe@Example.COM")), "inst_imperial")
+		assertThat(mapper.map(idToken(Map.of("email", "John.Doe@Example.COM")), "inst_7f3")
 				.userId()).isEqualTo("usr_6712ab");
 	}
 
@@ -110,7 +110,7 @@ class OidcUserMapperTest {
 				"role", "ADMIN",
 				"groups", List.of("ADMIN"),
 				"permissions", List.of("*"),
-				"extension_roles", "ADMIN")), "inst_imperial");
+				"extension_roles", "ADMIN")), "inst_7f3");
 
 		assertThat(user.roles()).containsExactly("MEMBER");
 	}
@@ -119,7 +119,7 @@ class OidcUserMapperTest {
 	void aCollectionsClaimCannotGrantEntitlements() {
 		TnfUser user = mapper.map(idToken(Map.of(
 				"email", "john.doe@example.com",
-				"collections", List.of("col_everything"))), "inst_imperial");
+				"collections", List.of("col_everything"))), "inst_7f3");
 
 		assertThat(user.collections()).containsExactly("col_medicine");
 	}
@@ -130,10 +130,10 @@ class OidcUserMapperTest {
 		// ignored, and the user resolved is the one at the institution we were passed.
 		TnfUser user = mapper.map(idToken(Map.of(
 				"email", "john.doe@example.com",
-				"institutionId", "inst_imperial",
-				"extension_institution", "inst_imperial")), "inst_dsu");
+				"institutionId", "inst_7f3",
+				"extension_institution", "inst_7f3")), "inst_ucl");
 
-		assertThat(user.institutionId()).isEqualTo("inst_dsu");
+		assertThat(user.institutionId()).isEqualTo("inst_ucl");
 		assertThat(user.userId()).isEqualTo("usr_8c14de");
 	}
 
@@ -141,7 +141,7 @@ class OidcUserMapperTest {
 	void aTypeClaimCannotTurnAnInstitutionalMemberIntoAnIndividual() {
 		assertThat(mapper.map(idToken(Map.of(
 				"email", "john.doe@example.com",
-				"type", "INDIVIDUAL")), "inst_imperial").type())
+				"type", "INDIVIDUAL")), "inst_7f3").type())
 				.isEqualTo(UserType.INSTITUTION);
 	}
 
@@ -151,9 +151,9 @@ class OidcUserMapperTest {
 		// and the reason both mappers end at the same (email, institutionId) lookup.
 		Map<String, Object> claims = Map.of("email", "john.doe@example.com");
 
-		assertThat(mapper.map(idToken(claims), "inst_imperial").userId()).isEqualTo("usr_6712ab");
-		assertThat(mapper.map(idToken(claims), "inst_dsu").userId()).isEqualTo("usr_8c14de");
-		assertThat(mapper.map(idToken(claims), "inst_xyz").userId()).isEqualTo("usr_3f81ab");
+		assertThat(mapper.map(idToken(claims), "inst_7f3").userId()).isEqualTo("usr_6712ab");
+		assertThat(mapper.map(idToken(claims), "inst_ucl").userId()).isEqualTo("usr_8c14de");
+		assertThat(mapper.map(idToken(claims), "inst_leeds").userId()).isEqualTo("usr_3f81ab");
 	}
 
 	// ───────────────────────────── refusals ─────────────────────────────
@@ -163,7 +163,7 @@ class OidcUserMapperTest {
 		// Authenticated by B2C is not provisioned by us, and the two refusals are different: 403
 		// here, not 401, because the token was fine and the person is simply not a member.
 		assertThatThrownBy(() -> mapper.map(idToken(Map.of("email", "stranger@example.com")),
-				"inst_imperial"))
+				"inst_7f3"))
 				.isInstanceOf(ApiException.class)
 				.extracting(thrown -> ((ApiException) thrown).code())
 				.isEqualTo(ErrorCode.USER_NOT_PROVISIONED);
@@ -173,7 +173,7 @@ class OidcUserMapperTest {
 	void aMembershipAtAnotherInstitutionIsStillNoMembershipHere() {
 		// jane.roe is seeded at Imperial only.
 		assertThatThrownBy(() -> mapper.map(idToken(Map.of("email", "jane.roe@example.com")),
-				"inst_dsu"))
+				"inst_ucl"))
 				.extracting(thrown -> ((ApiException) thrown).code())
 				.isEqualTo(ErrorCode.USER_NOT_PROVISIONED);
 	}
@@ -183,7 +183,7 @@ class OidcUserMapperTest {
 		// Refused rather than defaulted to the subject: a lookup by something that is not an email
 		// address would either miss every time or, worse, one day hit.
 		assertThatThrownBy(() -> mapper.map(idToken(Map.of("oid", "b2c-object-id", "name", "John")),
-				"inst_imperial"))
+				"inst_7f3"))
 				.isInstanceOf(ApiException.class)
 				.extracting(thrown -> ((ApiException) thrown).code())
 				.isEqualTo(ErrorCode.OIDC_AUTHENTICATION_FAILED);
@@ -195,7 +195,7 @@ class OidcUserMapperTest {
 		// nothing. Neither of these is a string, so neither is an email, so this refuses.
 		assertThatThrownBy(() -> mapper.map(
 				idToken(Map.of("emails", Map.of("value", "john.doe@example.com"), "email", 42)),
-				"inst_imperial"))
+				"inst_7f3"))
 				.extracting(thrown -> ((ApiException) thrown).code())
 				.isEqualTo(ErrorCode.OIDC_AUTHENTICATION_FAILED);
 	}
@@ -224,7 +224,7 @@ class OidcUserMapperTest {
 	void aTokenWithNoSubjectClaimStillSignsIn() {
 		// The subject is evidence for the audit trail, not identity. Its absence is not a refusal.
 		assertThat(mapper.resolveSubject(idToken(Map.of("email", "john.doe@example.com")))).isNull();
-		assertThat(mapper.map(idToken(Map.of("email", "john.doe@example.com")), "inst_imperial"))
+		assertThat(mapper.map(idToken(Map.of("email", "john.doe@example.com")), "inst_7f3"))
 				.isNotNull();
 	}
 

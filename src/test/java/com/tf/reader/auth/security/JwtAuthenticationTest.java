@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,10 +19,12 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.tf.reader.TestcontainersConfiguration;
+import com.tf.reader.auth.AuthTestInstitutions;
 import com.tf.reader.auth.model.TnfUser;
 import com.tf.reader.auth.model.UserType;
 import com.tf.reader.auth.token.JwtProperties;
 import com.tf.reader.auth.token.JwtTokenService;
+import com.tf.reader.catalogue.repository.InstitutionRepository;
 
 /**
  * The whole request-time path, end to end through the real filter chain:
@@ -40,17 +43,25 @@ class JwtAuthenticationTest {
 	private static final String OTHER_SECRET = "a-different-secret-of-sufficient-length-9876543210abc";
 
 	private static final TnfUser MEMBER = new TnfUser("usr_6712ab", UserType.INSTITUTION,
-			"inst_imperial", List.of("MEMBER"), List.of("col_medicine"));
+			"inst_7f3", List.of("MEMBER"), List.of("col_medicine"));
 
 	@Autowired
 	private MockMvc mockMvc;
+
+	@Autowired
+	private InstitutionRepository institutions;
+
+	@BeforeEach
+	void seedInstitutions() {
+		AuthTestInstitutions.seed(institutions);
+	}
 
 	@Test
 	void aValidTokenAuthenticatesAndReachesTheController() throws Exception {
 		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + tokenFor(MEMBER)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.userId").value("usr_6712ab"))
-				.andExpect(jsonPath("$.institutionId").value("inst_imperial"))
+				.andExpect(jsonPath("$.institutionId").value("inst_7f3"))
 				.andExpect(jsonPath("$.type").value("INSTITUTION"))
 				.andExpect(jsonPath("$.roles[0]").value("MEMBER"))
 				.andExpect(jsonPath("$.collections[0]").value("col_medicine"));
@@ -61,7 +72,7 @@ class JwtAuthenticationTest {
 		// That roles become ROLE_-prefixed authorities is asserted in CurrentUserJwtConverterTest,
 		// against the Authentication itself. Here it matters only that several reach the far side
 		// of the filter chain intact.
-		TnfUser admin = new TnfUser("usr_b920fe", UserType.INSTITUTION, "inst_imperial",
+		TnfUser admin = new TnfUser("usr_b920fe", UserType.INSTITUTION, "inst_7f3",
 				List.of("MEMBER", "ADMIN"), List.of("col_medicine"));
 
 		mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + tokenFor(admin)))
@@ -92,11 +103,11 @@ class JwtAuthenticationTest {
 		// institution's id gets its own identity back, because the token is the only source.
 		mockMvc.perform(get("/api/v1/auth/me")
 						.queryParam("userId", "usr_admin")
-						.queryParam("institutionId", "inst_dsu")
+						.queryParam("institutionId", "inst_ucl")
 						.header("Authorization", "Bearer " + tokenFor(MEMBER)))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.userId").value("usr_6712ab"))
-				.andExpect(jsonPath("$.institutionId").value("inst_imperial"));
+				.andExpect(jsonPath("$.institutionId").value("inst_7f3"));
 	}
 
 	@Test
@@ -161,8 +172,7 @@ class JwtAuthenticationTest {
 		// The JWT filter must not stand in front of the way you get a JWT.
 		mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
 						.post("/api/v1/auth/saml/start")
-						.contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-						.content("{\"institutionId\":\"inst_imperial\"}"))
+						.param("institutionId", "inst_7f3"))
 				.andExpect(status().isOk());
 	}
 

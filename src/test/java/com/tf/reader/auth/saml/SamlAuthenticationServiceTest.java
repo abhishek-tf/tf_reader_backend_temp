@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -19,7 +20,6 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.saml2.provider.service.authentication.Saml2AssertionAuthentication;
 import org.springframework.security.saml2.provider.service.authentication.Saml2ResponseAssertionAccessor;
 
-import com.tf.reader.auth.repository.MockInstitutionRepository;
 import com.tf.reader.auth.repository.MockUserRepository;
 import com.tf.reader.auth.security.TnfJwtValidator;
 import com.tf.reader.auth.saml.SamlAuthenticationService.SamlLoginResult;
@@ -27,6 +27,7 @@ import com.tf.reader.auth.token.JwtProperties;
 import com.tf.reader.auth.token.JwtTokenService;
 import com.tf.reader.auth.transaction.AuthTransaction;
 import com.tf.reader.auth.transaction.AuthTransactionStore;
+import com.tf.reader.catalogue.api.InstitutionRef;
 import com.tf.reader.common.error.ApiException;
 import com.tf.reader.common.error.ErrorCode;
 
@@ -44,21 +45,26 @@ class SamlAuthenticationServiceTest {
 	private final AuthTransactionStore transactions =
 			new AuthTransactionStore(Clock.fixed(NOW, ZoneOffset.UTC));
 
+	private static final Map<String, InstitutionRef> INSTITUTIONS = Map.of(
+			"inst_7f3", new InstitutionRef("inst_7f3", "Imperial College London"),
+			"inst_ucl", new InstitutionRef("inst_ucl", "University College London"));
+
 	private final SamlAuthenticationService service = new SamlAuthenticationService(transactions,
-			new MockInstitutionRepository(), new SamlUserMapper(new MockUserRepository()),
+			institutionId -> Optional.ofNullable(INSTITUTIONS.get(institutionId)),
+			new SamlUserMapper(new MockUserRepository()),
 			JwtTokenService.forTest(SECRET, java.time.Duration.ofHours(1),
 					Clock.fixed(NOW, ZoneOffset.UTC)),
 			Clock.fixed(NOW, ZoneOffset.UTC));
 
 	@Test
 	void completesASignInForTheInstitutionTheTransactionWasOpenedFor() {
-		AuthTransaction transaction = transactions.open("inst_imperial");
+		AuthTransaction transaction = transactions.open("inst_7f3");
 
 		SamlLoginResult result = service.complete(samlAuthentication("john.doe@example.com"),
 				transaction.id());
 
-		assertThat(result.institution().institutionId()).isEqualTo("inst_imperial");
-		assertThat(result.institution().name()).isEqualTo("Imperial College");
+		assertThat(result.institution().institutionId()).isEqualTo("inst_7f3");
+		assertThat(result.institution().name()).isEqualTo("Imperial College London");
 		assertThat(result.samlSubject()).isEqualTo("john.doe@example.com");
 		assertThat(result.user().userId()).isEqualTo("usr_6712ab");
 		assertThat(result.serverTime()).isEqualTo(NOW);
@@ -71,13 +77,13 @@ class SamlAuthenticationServiceTest {
 		Authentication sameIdentity = samlAuthentication("john.doe@example.com");
 
 		SamlLoginResult imperial =
-				service.complete(sameIdentity, transactions.open("inst_imperial").id());
-		SamlLoginResult dsu = service.complete(sameIdentity, transactions.open("inst_dsu").id());
+				service.complete(sameIdentity, transactions.open("inst_7f3").id());
+		SamlLoginResult dsu = service.complete(sameIdentity, transactions.open("inst_ucl").id());
 
 		assertThat(imperial.user().userId()).isEqualTo("usr_6712ab");
-		assertThat(imperial.user().institutionId()).isEqualTo("inst_imperial");
+		assertThat(imperial.user().institutionId()).isEqualTo("inst_7f3");
 		assertThat(dsu.user().userId()).isEqualTo("usr_8c14de");
-		assertThat(dsu.user().institutionId()).isEqualTo("inst_dsu");
+		assertThat(dsu.user().institutionId()).isEqualTo("inst_ucl");
 		assertThat(imperial.samlSubject()).isEqualTo(dsu.samlSubject());
 	}
 
@@ -104,7 +110,7 @@ class SamlAuthenticationServiceTest {
 
 	@Test
 	void refusesAReplayedRelayState() {
-		AuthTransaction transaction = transactions.open("inst_imperial");
+		AuthTransaction transaction = transactions.open("inst_7f3");
 		Authentication authentication = samlAuthentication("john.doe@example.com");
 		service.complete(authentication, transaction.id());
 
@@ -117,7 +123,7 @@ class SamlAuthenticationServiceTest {
 	@Test
 	void refusesAnAuthenticationThatCarriesNoSamlAssertion() {
 		Authentication notSaml = new UsernamePasswordAuthenticationToken("john", "secret");
-		String relayState = transactions.open("inst_imperial").id();
+		String relayState = transactions.open("inst_7f3").id();
 
 		assertThatThrownBy(() -> service.complete(notSaml, relayState))
 				.isInstanceOf(ApiException.class)
@@ -128,7 +134,7 @@ class SamlAuthenticationServiceTest {
 	@Test
 	void refusesAnIdentityWithNoMembershipAtTheSelectedInstitution() {
 		Authentication jane = samlAuthentication("jane.roe@example.com");
-		String dsu = transactions.open("inst_dsu").id();
+		String dsu = transactions.open("inst_ucl").id();
 
 		assertThatThrownBy(() -> service.complete(jane, dsu))
 				.isInstanceOf(ApiException.class)
@@ -141,12 +147,12 @@ class SamlAuthenticationServiceTest {
 		// The token is issued from the mapped user, after mapping succeeded - so a refused
 		// mapping can never produce one, and the token can never disagree with the user beside it.
 		SamlLoginResult result = service.complete(samlAuthentication("john.doe@example.com"),
-				transactions.open("inst_dsu").id());
+				transactions.open("inst_ucl").id());
 
 		Jwt jwt = decoderAtTheTestsClock().decode(result.token());
 
 		assertThat(jwt.getClaimAsString("userId")).isEqualTo(result.user().userId());
-		assertThat(jwt.getClaimAsString("institutionId")).isEqualTo("inst_dsu");
+		assertThat(jwt.getClaimAsString("institutionId")).isEqualTo("inst_ucl");
 		assertThat(jwt.getExpiresAt()).isEqualTo(result.expiresAt());
 	}
 

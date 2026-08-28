@@ -84,6 +84,9 @@ pom.xml.versionsBackup
 *.log
 logs/
 log/
+# Team-maintained changelogs, not runtime output — tracked despite the blanket rule above.
+!logs/
+!logs/*.md
 
 
 .env
@@ -121,8 +124,6 @@ docker-compose.override.yml
 mongo-data/
 
 
-.claude/settings.local.json
-
 
 /docs/
 /documents
@@ -153,3 +154,6 @@ master-key*
 
 # temp
 temp/
+
+probe.sh
+dump.rdb

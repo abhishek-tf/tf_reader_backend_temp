@@ -25,13 +25,13 @@ class CurrentUserJwtConverterTest {
 		CurrentUser user = principalOf(jwt(Map.of(
 				"userId", "usr_6712ab",
 				"type", "INSTITUTION",
-				"institutionId", "inst_imperial",
+				"institutionId", "inst_7f3",
 				"roles", List.of("MEMBER"),
 				"collections", List.of("col_medicine"))));
 
 		assertThat(user.userId()).isEqualTo("usr_6712ab");
 		assertThat(user.type()).isEqualTo(UserType.INSTITUTION);
-		assertThat(user.institutionId()).isEqualTo("inst_imperial");
+		assertThat(user.institutionId()).isEqualTo("inst_7f3");
 		assertThat(user.roles()).containsExactly("MEMBER");
 		assertThat(user.collections()).containsExactly("col_medicine");
 		assertThat(user.belongsToAnInstitution()).isTrue();
@@ -43,7 +43,7 @@ class CurrentUserJwtConverterTest {
 		AbstractAuthenticationToken authentication = converter.convert(jwt(Map.of(
 				"userId", "usr_b920fe",
 				"type", "INSTITUTION",
-				"institutionId", "inst_imperial",
+				"institutionId", "inst_7f3",
 				"roles", List.of("MEMBER", "ADMIN"),
 				"collections", List.of("col_medicine"))));
 
@@ -91,7 +91,7 @@ class CurrentUserJwtConverterTest {
 		CurrentUser user = principalOf(jwt(Map.of(
 				"userId", "usr_6712ab",
 				"type", "INSTITUTION",
-				"institutionId", "inst_imperial",
+				"institutionId", "inst_7f3",
 				"roles", List.of("MEMBER"),
 				"collections", List.of("col_medicine"),
 				"admin", true,
@@ -109,7 +109,7 @@ class CurrentUserJwtConverterTest {
 		return jwt(Map.of(
 				"userId", "usr_6712ab",
 				"type", "INSTITUTION",
-				"institutionId", "inst_imperial",
+				"institutionId", "inst_7f3",
 				"roles", List.of("MEMBER"),
 				"collections", List.of("col_medicine")));
 	}

@@ -1,5 +1,6 @@
 package com.tf.reader.library.service;
 
+import java.time.Clock;
 import java.time.temporal.ChronoUnit;
 
 import org.springframework.stereotype.Service;
@@ -7,6 +8,8 @@ import org.springframework.stereotype.Service;
 import com.tf.reader.library.api.ChangeLog;
 import com.tf.reader.library.api.ChangeRecord;
 import com.tf.reader.library.entity.ChangeLogEntry;
+import com.tf.reader.library.entity.OutboxEntry;
+import com.tf.reader.library.repository.ChangeLogOutboxRepository;
 import com.tf.reader.library.repository.ChangeLogRepository;
 
 import lombok.extern.slf4j.Slf4j;
@@ -22,11 +25,16 @@ public class ChangeLogWriter implements ChangeLog {
 	private static final long NOT_RECORDED = 0L;
 
 	private final ChangeLogRepository changeLog;
+	private final ChangeLogOutboxRepository outbox;
 	private final ReaderSequenceAllocator sequences;
+	private final Clock clock;
 
-	public ChangeLogWriter(ChangeLogRepository changeLog, ReaderSequenceAllocator sequences) {
+	public ChangeLogWriter(ChangeLogRepository changeLog, ChangeLogOutboxRepository outbox,
+			ReaderSequenceAllocator sequences, Clock clock) {
 		this.changeLog = changeLog;
+		this.outbox = outbox;
 		this.sequences = sequences;
+		this.clock = clock;
 	}
 
 	@Override
@@ -61,7 +69,31 @@ public class ChangeLogWriter implements ChangeLog {
 			// case the full read does not paper over quickly.
 			log.error("change log write failed, reader={} reason={} item={} — entry lost",
 					change.userId(), change.reason(), change.itemId(), failed);
+			saveToOutbox(change);
 			return NOT_RECORDED;
+		}
+	}
+
+	// A second, independent failure here (Mongo itself unreachable, not just this one write
+	// racing an index) is only ever logged, never rethrown — the same reason record() itself
+	// never throws. OutboxReplayService is what gives this entry a real chance later; this
+	// method existing at all is what gives OutboxReplayService anything to find.
+	private void saveToOutbox(ChangeRecord change) {
+		try {
+			outbox.save(OutboxEntry.builder()
+					.userId(change.userId())
+					.reason(change.reason())
+					.itemId(change.itemId())
+					.loanId(change.loanId())
+					.holdId(change.holdId())
+					.occurredAt(change.occurredAt().truncatedTo(ChronoUnit.SECONDS))
+					.failedAt(clock.instant())
+					.attempts(0)
+					.build());
+		}
+		catch (RuntimeException outboxAlsoFailed) {
+			log.error("change log outbox write also failed, reader={} reason={} item={} — entry"
+					+ " permanently lost", change.userId(), change.reason(), change.itemId(), outboxAlsoFailed);
 		}
 	}
 

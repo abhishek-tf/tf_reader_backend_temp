@@ -1,5 +1,6 @@
 package com.tf.reader.loan.controller;
 
+import java.time.Duration;
 import java.util.Locale;
 
 import jakarta.validation.Valid;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,8 +27,11 @@ import com.tf.reader.loan.dto.BorrowResponse;
 import com.tf.reader.loan.dto.LoanPage;
 import com.tf.reader.loan.dto.ReturnResponse;
 import com.tf.reader.loan.entity.LoanStatus;
+import java.time.Clock;
+
 import com.tf.reader.loan.service.BorrowService;
 import com.tf.reader.loan.service.BorrowService.BorrowResult;
+import com.tf.reader.loan.service.IdempotencyStore;
 import com.tf.reader.loan.service.LoanListService;
 import com.tf.reader.loan.service.ReturnService;
 
@@ -42,25 +47,42 @@ import com.tf.reader.loan.service.ReturnService;
 @RequestMapping("/api/v1/loans")
 public class LoanController {
 
+	private static final Duration IDEMPOTENCY_TTL = Duration.ofMinutes(5);
+
 	private final BorrowService borrowService;
 	private final LoanListService loanList;
 	private final ReturnService returnService;
+	private final IdempotencyStore<BorrowResponse> borrowIdempotency;
+	private final IdempotencyStore<ReturnResponse> returnIdempotency;
 
 	public LoanController(BorrowService borrowService, LoanListService loanList,
-			ReturnService returnService) {
+			ReturnService returnService, Clock clock) {
 		this.borrowService = borrowService;
 		this.loanList = loanList;
 		this.returnService = returnService;
+		this.borrowIdempotency = new IdempotencyStore<>(IDEMPOTENCY_TTL, clock);
+		this.returnIdempotency = new IdempotencyStore<>(IDEMPOTENCY_TTL, clock);
 	}
 
 	/** Borrow a title → 201 created / 200 already held · 403 not entitled · 409 no copies (D-024). */
 	@PostMapping
 	public ResponseEntity<BorrowResponse> borrow(
 			@AuthenticationPrincipal CurrentUser caller,
-			@Valid @RequestBody BorrowRequest request) {
+			@Valid @RequestBody BorrowRequest request,
+			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
+
+		if (idempotencyKey != null) {
+			var cached = borrowIdempotency.get(caller.userId(), idempotencyKey);
+			if (cached.isPresent()) {
+				return ResponseEntity.ok(cached.get());
+			}
+		}
 
 		SubjectRef subject = new SubjectRef(caller.userId(), caller.institutionId());
 		BorrowResult result = borrowService.borrow(subject, request.itemId());
+		if (idempotencyKey != null) {
+			borrowIdempotency.put(caller.userId(), idempotencyKey, result.body());
+		}
 		return result.created()
 				? ResponseEntity.status(HttpStatus.CREATED).body(result.body())
 				: ResponseEntity.ok(result.body());
@@ -79,9 +101,21 @@ public class LoanController {
 	@PostMapping("/{loanId}/return")
 	public ReturnResponse returnLoan(
 			@AuthenticationPrincipal CurrentUser caller,
-			@PathVariable String loanId) {
+			@PathVariable String loanId,
+			@RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
 
-		return returnService.returnLoan(caller.userId(), loanId);
+		if (idempotencyKey != null) {
+			var cached = returnIdempotency.get(caller.userId(), idempotencyKey);
+			if (cached.isPresent()) {
+				return cached.get();
+			}
+		}
+
+		ReturnResponse response = returnService.returnLoan(caller.userId(), loanId);
+		if (idempotencyKey != null) {
+			returnIdempotency.put(caller.userId(), idempotencyKey, response);
+		}
+		return response;
 	}
 
 	/** {@code null}/blank → no filter; an unrecognised value → 400 rather than a silent empty page. */

@@ -89,7 +89,7 @@ class TnfJwtValidatorTest {
 		// carries one; this is where that stops being a comment.
 		Map<String, Object> claims = claims();
 		claims.put("type", "INDIVIDUAL");
-		claims.put("institutionId", "inst_imperial");
+		claims.put("institutionId", "inst_7f3");
 
 		assertThat(errorCodes(validator.validate(jwt(NOW.plusSeconds(60), claims))))
 				.containsExactly(TnfJwtValidator.MISSING_CLAIMS);
@@ -125,7 +125,7 @@ class TnfJwtValidatorTest {
 		Map<String, Object> claims = new HashMap<>();
 		claims.put("userId", "usr_6712ab");
 		claims.put("type", "INSTITUTION");
-		claims.put("institutionId", "inst_imperial");
+		claims.put("institutionId", "inst_7f3");
 		claims.put("roles", List.of("MEMBER"));
 		claims.put("collections", List.of("col_medicine"));
 		return claims;

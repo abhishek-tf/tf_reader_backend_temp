@@ -37,7 +37,7 @@ class DemoDataSeederTest {
     private static final Instant SEED_EPOCH = Instant.parse("2026-08-10T09:00:00Z");
 
     /**
-     * These four are not week 1 placeholders like the other eight items: their ids and their
+     * These six are not week 1 placeholders like the other eight items: their ids and their
      * {@code storageKey}s are matched by exact string equality in
      * {@code ContentAccessGrantImpl}, against real AES-256-GCM fixture files under
      * {@code src/main/resources/static/mock-content/}. The {@code item_}/{@code seed/}
@@ -45,7 +45,13 @@ class DemoDataSeederTest {
      * from working content, not just fail a naming check.
      */
     private static final Set<String> DEV_CONTENT_FIXTURE_ITEM_IDS =
-            Set.of("dev-sample-epub", "dev-sample-pdf", "dev-fixture-epub", "dev-fixture-pdf");
+            Set.of(
+                    "dev-sample-epub",
+                    "dev-sample-pdf",
+                    "dev-sample-audio",
+                    "dev-sample-audio-encrypted",
+                    "dev-fixture-epub",
+                    "dev-fixture-pdf");
 
     private static ObjectMapper mapper;
     private static SeedDataset dataset;
@@ -72,15 +78,15 @@ class DemoDataSeederTest {
         assertThat(dataset.publishers()).hasSize(2);
         assertThat(dataset.collections()).hasSize(2);
         assertThat(dataset.institutions()).hasSize(3);
-        // Eight week 1 placeholders plus the four real dev-content fixtures (see
+        // Eight week 1 placeholders plus the six real dev-content fixtures (see
         // DEV_CONTENT_FIXTURE_ITEM_IDS) that ContentAccessGrantImpl routes to real files.
-        assertThat(dataset.catalogueItems()).hasSize(12);
+        assertThat(dataset.catalogueItems()).hasSize(14);
         assertThat(dataset.entitlements()).hasSize(3);
         assertThat(dataset.adminUsers()).hasSize(3);
         assertThat(dataset.feedSettings()).hasSize(3);
 
         // One number, so an extra row cannot be added without someone updating the plan too.
-        assertThat(dataset.documentCount()).isEqualTo(28);
+        assertThat(dataset.documentCount()).isEqualTo(30);
     }
 
     @Test
@@ -90,7 +96,7 @@ class DemoDataSeederTest {
         assertPrefixed(ids(dataset.collections(), SeedDataset.SeedCollection::id), "col_");
         assertPrefixed(ids(dataset.institutions(), SeedDataset.SeedInstitution::id), "inst_");
 
-        // The four dev-content fixtures are matched by exact id in ContentAccessGrantImpl, not
+        // The six dev-content fixtures are matched by exact id in ContentAccessGrantImpl, not
         // prefixed like the rest - carved out rather than renamed, see
         // DEV_CONTENT_FIXTURE_ITEM_IDS. Checked against the known set explicitly, so a future
         // item with a genuine typo'd prefix doesn't slip through this exception by accident.
@@ -236,12 +242,17 @@ class DemoDataSeederTest {
     }
 
     @Test
-    @DisplayName("seeded audio assets are loaded exactly as authored: unencrypted, unindexed")
-    void seededAudioAssetsAreUnencryptedAndUnindexed() {
-        // This pins the fixture's own content, not a live business rule - a freshly ingested
-        // SUBSCRIPTION/ELITE audiobook is encrypted like any other locked asset (see TierRules).
-        // No audio asset ever gets a search index, seeded or live, since there is no text to index.
+    @DisplayName("audio is never encrypted, at any tier, except the one deliberate override fixture")
+    void audioIsNeverEncrypted() {
+        // The single most likely wrong assumption on both client teams, so it is data, not prose.
+        //
+        // dev-sample-audio-encrypted is EXCLUDED on purpose: team1/t4targaryen overrode shared.md's
+        // rule 2026-08-25 (see ContentAccessGrantImpl's AUDIO_ENCRYPTED_SMALL_FIXTURE comment) so
+        // their client can exercise whole-file decrypt-into-RAM for audio, same as EPUB/PDF, within
+        // their RAM budget. Every OTHER audio item must still hold the original invariant — this
+        // is a single named carve-out, not a loosening of the rule.
         dataset.catalogueItems().stream()
+                .filter(i -> !"dev-sample-audio-encrypted".equals(i.id()))
                 .flatMap(i -> i.assets().stream())
                 .filter(a -> "AUDIO".equals(a.format()))
                 .forEach(
@@ -421,9 +432,9 @@ class DemoDataSeederTest {
     void compositionIsDeliberate() {
         // These assertions are the composition table in the approach document, made executable. They
         // exist so that "tidying" a row that another team's test depends on fails here first.
-        // Six of the original eight (item_q7 is QUEUED, item_f3 is FAILED) plus all four
+        // Six of the original eight (item_q7 is QUEUED, item_f3 is FAILED) plus all six
         // dev-content fixtures, which are PUBLISHED and READY.
-        assertThat(dataset.catalogueItems()).filteredOn(SeedDataset.SeedItem::isFeedVisible).hasSize(10);
+        assertThat(dataset.catalogueItems()).filteredOn(SeedDataset.SeedItem::isFeedVisible).hasSize(12);
 
         assertThat(dataset.catalogueItems())
                 .extracting(SeedDataset.SeedItem::accessTier)

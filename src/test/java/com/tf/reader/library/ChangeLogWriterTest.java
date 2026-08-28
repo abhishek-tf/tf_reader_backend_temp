@@ -1,6 +1,8 @@
 package com.tf.reader.library;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -10,6 +12,7 @@ import org.springframework.dao.DuplicateKeyException;
 import com.tf.reader.library.api.ChangeReason;
 import com.tf.reader.library.api.ChangeRecord;
 import com.tf.reader.library.entity.ChangeLogEntry;
+import com.tf.reader.library.repository.ChangeLogOutboxRepository;
 import com.tf.reader.library.repository.ChangeLogRepository;
 import com.tf.reader.library.service.ChangeLogWriter;
 import com.tf.reader.library.service.ReaderSequenceAllocator;
@@ -29,8 +32,10 @@ class ChangeLogWriterTest {
 	private static final Instant AT = Instant.parse("2026-08-20T10:00:00Z");
 
 	private final ChangeLogRepository changeLog = mock(ChangeLogRepository.class);
+	private final ChangeLogOutboxRepository outbox = mock(ChangeLogOutboxRepository.class);
 	private final ReaderSequenceAllocator sequences = mock(ReaderSequenceAllocator.class);
-	private final ChangeLogWriter writer = new ChangeLogWriter(changeLog, sequences);
+	private final Clock clock = Clock.fixed(AT, ZoneOffset.UTC);
+	private final ChangeLogWriter writer = new ChangeLogWriter(changeLog, outbox, sequences, clock);
 
 	@Test
 	@DisplayName("the sequence comes from the allocator and is returned to the caller")
@@ -85,6 +90,8 @@ class ChangeLogWriterTest {
 
 		assertThatCode(() -> writer.record(change)).doesNotThrowAnyException();
 		assertThat(writer.record(change)).isZero();
+
+		verify(outbox, atLeastOnce()).save(any());
 	}
 
 	@Test

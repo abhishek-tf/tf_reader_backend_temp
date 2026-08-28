@@ -80,8 +80,11 @@ public class ReadBrokerService {
 			throw new ApiException(mapDenyReason(decision.reason()), "You do not have access to this title.");
 		}
 
-		// ── Step 3: Device cap check ──
-		if (subject != null && subject.userId() != null && !devices.admit(subject.userId(), deviceKey)) {
+		// ── Step 3: Device cap check (ELITE only) ──
+		// Open access and subscription access are not copy/device limited. Only an Elite
+		// entitlement consumes a concurrent-reading device slot.
+		if (decision.accessLevel() == AccessLevel.ENTITLED_CONCURRENT
+				&& subject != null && subject.userId() != null && !devices.admit(subject.userId(), deviceKey)) {
 			throw new ApiException(ErrorCode.DEVICE_LIMIT_REACHED, "This account is already reading on the maximum number of devices.");
 		}
 
@@ -119,15 +122,19 @@ public class ReadBrokerService {
 					request.wantSearchIndex()
 			));
 
-			// ── Step 8: Extend claim to loan due date ──
-			if (copyLimited && !lease.extend(held, licence.expiresAt())) {
-				if (!lease.extend(held, licence.expiresAt())) {
-					reconciler.reconcile(request.itemId());
-				}
+			// ── Step 8: Extend claim to THIS READING SESSION's own lifetime, not the loan's due
+			// date. A copy lease means "actively reading right now" — the loan's dueAt is null
+			// for ELITE (no subscription-style due date at all, confirmed by NPE here against a
+			// real re-fetched ELITE loan, 2026-08-25) and, for SUBSCRIPTION, days-to-weeks away,
+			// which would hold a copy hostage for the whole loan period on a single open instead
+			// of releasing it when the session ends — defeating the copy limit's own purpose.
+			Instant now = clock.instant();
+			Instant sessionExpiresAt = now.plus(SESSION_TTL);
+			if (copyLimited && !lease.extend(held, sessionExpiresAt)) {
+				reconciler.reconcile(request.itemId());
 			}
 
 			// ── Step 9: Forward payload unchanged ──
-			Instant now = clock.instant();
 			return new ReadingSessionResponse(
 					"sess_" + UUID.randomUUID().toString().substring(0, 8),
 					licence.licenceId(),
@@ -139,7 +146,7 @@ public class ReadBrokerService {
 					grant.content(),
 					grant.index(),
 					grant.encryption(),
-					now.plus(SESSION_TTL),
+					sessionExpiresAt,
 					now
 			);
 

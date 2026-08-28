@@ -33,9 +33,9 @@ class AuthTransactionStoreTest {
 
 	@Test
 	void openingATransactionRecordsTheInstitutionServerSide() {
-		AuthTransaction transaction = store.open("inst_imperial");
+		AuthTransaction transaction = store.open("inst_7f3");
 
-		assertThat(transaction.institutionId()).isEqualTo("inst_imperial");
+		assertThat(transaction.institutionId()).isEqualTo("inst_7f3");
 		assertThat(transaction.createdAt()).isEqualTo(NOW);
 		assertThat(transaction.expiresAt()).isEqualTo(NOW.plus(AuthTransactionStore.LIFETIME));
 	}
@@ -44,10 +44,10 @@ class AuthTransactionStoreTest {
 	void theIdIsOpaqueAndCarriesNoInstitution() {
 		// The id crosses a third party as RelayState. Anything readable in it is a leak, and
 		// anything guessable in it is a way to land on somebody else's institution.
-		AuthTransaction transaction = store.open("inst_imperial");
+		AuthTransaction transaction = store.open("inst_7f3");
 
 		assertThat(transaction.id()).startsWith("authTxn_").doesNotContain("imperial");
-		assertThat(transaction.id()).isNotEqualTo(store.open("inst_imperial").id());
+		assertThat(transaction.id()).isNotEqualTo(store.open("inst_7f3").id());
 	}
 
 	@Test
@@ -57,7 +57,7 @@ class AuthTransactionStoreTest {
 		// 24 bytes of SecureRandom, base64url encoded, is 32 characters after the prefix.
 		Set<String> ids = new HashSet<>();
 		for (int i = 0; i < 1_000; i++) {
-			ids.add(store.open("inst_imperial").id());
+			ids.add(store.open("inst_7f3").id());
 		}
 
 		assertThat(ids).hasSize(1_000);
@@ -70,7 +70,7 @@ class AuthTransactionStoreTest {
 		// The institution is decided once, at /saml/start, and read back at the ACS. If anything
 		// could change it in between, the server-side store would stop being the answer to "which
 		// institution is this sign-in for". A record has no setters; this fails if that changes.
-		AuthTransaction transaction = store.open("inst_dsu");
+		AuthTransaction transaction = store.open("inst_ucl");
 
 		assertThat(AuthTransaction.class.getMethods())
 				.describedAs("AuthTransaction must stay immutable")
@@ -78,23 +78,23 @@ class AuthTransactionStoreTest {
 
 		AuthTransaction consumed = store.consume(transaction.id()).orElseThrow();
 		assertThat(consumed).isEqualTo(transaction);
-		assertThat(consumed.institutionId()).isEqualTo("inst_dsu");
+		assertThat(consumed.institutionId()).isEqualTo("inst_ucl");
 	}
 
 	@Test
 	void consumingReturnsTheInstitutionThatWasStored() {
-		AuthTransaction opened = store.open("inst_dsu");
+		AuthTransaction opened = store.open("inst_ucl");
 
 		assertThat(store.consume(opened.id()))
 				.get()
 				.extracting(AuthTransaction::institutionId)
-				.isEqualTo("inst_dsu");
+				.isEqualTo("inst_ucl");
 	}
 
 	@Test
 	void aTransactionIsSingleUse() {
 		// Otherwise one captured RelayState signs somebody in repeatedly.
-		AuthTransaction opened = store.open("inst_imperial");
+		AuthTransaction opened = store.open("inst_7f3");
 
 		assertThat(store.consume(opened.id())).isPresent();
 		assertThat(store.consume(opened.id())).isEmpty();
@@ -107,7 +107,7 @@ class AuthTransactionStoreTest {
 		// two sessions from one authentication. remove() decides the winner atomically, and this
 		// is the test that would notice if it were ever rewritten as containsKey() plus remove().
 		int callers = 32;
-		AuthTransaction opened = store.open("inst_imperial");
+		AuthTransaction opened = store.open("inst_7f3");
 		ExecutorService pool = Executors.newFixedThreadPool(callers);
 		CountDownLatch startTogether = new CountDownLatch(1);
 		AtomicInteger winners = new AtomicInteger();
@@ -146,7 +146,7 @@ class AuthTransactionStoreTest {
 
 	@Test
 	void anExpiredTransactionIsRejected() {
-		AuthTransaction opened = store.open("inst_imperial");
+		AuthTransaction opened = store.open("inst_7f3");
 
 		clock.advance(AuthTransactionStore.LIFETIME);
 
@@ -159,12 +159,12 @@ class AuthTransactionStoreTest {
 		// scheduler in this application - so without this sweep an anonymous caller could add one
 		// permanent map entry per request until the heap ran out.
 		for (int i = 0; i < AuthTransactionStore.EVICT_ABOVE; i++) {
-			store.open("inst_imperial");
+			store.open("inst_7f3");
 		}
 		assertThat(store.inFlight()).isEqualTo(AuthTransactionStore.EVICT_ABOVE);
 
 		clock.advance(AuthTransactionStore.LIFETIME);
-		store.open("inst_imperial");
+		store.open("inst_7f3");
 
 		assertThat(store.inFlight())
 				.describedAs("the expired ones must be gone, leaving only the new transaction")
@@ -173,12 +173,12 @@ class AuthTransactionStoreTest {
 
 	@Test
 	void abandonedTransactionsAreEvicted() {
-		store.open("inst_imperial");
-		store.open("inst_dsu");
-		AuthTransaction live = store.open("inst_xyz");
+		store.open("inst_7f3");
+		store.open("inst_ucl");
+		AuthTransaction live = store.open("inst_leeds");
 
 		clock.advance(AuthTransactionStore.LIFETIME.minusSeconds(1));
-		AuthTransaction later = store.open("inst_imperial");
+		AuthTransaction later = store.open("inst_7f3");
 		clock.advance(Duration.ofSeconds(1));
 
 		assertThat(store.evictExpired()).isEqualTo(3);

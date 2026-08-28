@@ -11,11 +11,12 @@ import org.springframework.stereotype.Service;
 
 import com.tf.reader.auth.model.Institution;
 import com.tf.reader.auth.model.TnfUser;
-import com.tf.reader.auth.repository.MockInstitutionRepository;
 import com.tf.reader.auth.token.IssuedToken;
 import com.tf.reader.auth.token.TokenService;
 import com.tf.reader.auth.transaction.AuthTransaction;
 import com.tf.reader.auth.transaction.AuthTransactionStore;
+import com.tf.reader.catalogue.api.InstitutionLookup;
+import com.tf.reader.catalogue.api.InstitutionRef;
 import com.tf.reader.common.error.ApiException;
 import com.tf.reader.common.error.ErrorCode;
 
@@ -34,13 +35,13 @@ import com.tf.reader.common.error.ErrorCode;
 public class SamlAuthenticationService {
 
 	private final AuthTransactionStore transactions;
-	private final MockInstitutionRepository institutions;
+	private final InstitutionLookup institutions;
 	private final SamlUserMapper userMapper;
 	private final TokenService tokenService;
 	private final Clock clock;
 
 	public SamlAuthenticationService(AuthTransactionStore transactions,
-			MockInstitutionRepository institutions, SamlUserMapper userMapper,
+			InstitutionLookup institutions, SamlUserMapper userMapper,
 			TokenService tokenService, Clock clock) {
 		this.transactions = transactions;
 		this.institutions = institutions;
@@ -84,9 +85,10 @@ public class SamlAuthenticationService {
 				.orElseThrow(() -> new ApiException(ErrorCode.SAML_AUTHENTICATION_FAILED,
 						"This sign-in could not be matched to a transaction we started."));
 
-		return institutions.find(transaction.institutionId())
+		InstitutionRef institutionRef = institutions.find(transaction.institutionId())
 				.orElseThrow(() -> new ApiException(ErrorCode.SAML_AUTHENTICATION_FAILED,
 						"The institution this sign-in was started for no longer exists."));
+		return new Institution(institutionRef.institutionId(), institutionRef.name());
 	}
 
 	private Saml2ResponseAssertionAccessor assertionOf(Authentication authentication) {

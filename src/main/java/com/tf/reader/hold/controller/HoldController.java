@@ -1,6 +1,7 @@
 package com.tf.reader.hold.controller;
 
 import com.tf.reader.auth.model.CurrentUser;
+import com.tf.reader.hold.dto.AcceptedLoanResponse;
 import com.tf.reader.hold.dto.HoldRequest;
 import com.tf.reader.hold.dto.HoldResponse;
 import com.tf.reader.hold.service.QueueService;
@@ -14,8 +15,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 
-// HTTP endpoints for placing and reading holds. Leave and accept land in a
-// later commit, once QueueService grows those lifecycle transitions.
+// HTTP endpoints for placing, reading, cancelling and accepting holds.
 @RestController
 @RequestMapping("/api/v1/holds")
 public class HoldController {
@@ -44,5 +44,21 @@ public class HoldController {
     public List<HoldResponse> mine(@AuthenticationPrincipal CurrentUser me) {
         Instant now = clock.instant();
         return queue.holdsFor(me.userId()).stream().map(v -> HoldResponse.of(v, now)).toList();
+    }
+
+    // Leave the queue. Always 204 — cancelling an already-cancelled hold,
+    // or a holdId that was never yours, is not an error.
+    @DeleteMapping("/{holdId}")
+    public ResponseEntity<Void> leave(@AuthenticationPrincipal CurrentUser me, @PathVariable String holdId) {
+        queue.leave(me, holdId);
+        return ResponseEntity.noContent().build();
+    }
+
+    // Turn an offer into a loan. 201, same shape as POST /api/v1/loans —
+    // the copy is already leased in this reader's name.
+    @PostMapping("/{holdId}/accept")
+    public ResponseEntity<AcceptedLoanResponse> accept(@AuthenticationPrincipal CurrentUser me, @PathVariable String holdId) {
+        AcceptedLoanResponse loan = queue.accept(me, holdId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(loan);
     }
 }

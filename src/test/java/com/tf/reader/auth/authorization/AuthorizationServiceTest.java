@@ -22,10 +22,10 @@ import com.tf.reader.common.error.ErrorCode;
 class AuthorizationServiceTest {
 
 	private static final CurrentUser MEMBER = new CurrentUser("usr_6712ab", UserType.INSTITUTION,
-			"inst_imperial", List.of("MEMBER"), List.of("col_medicine"));
+			"inst_7f3", List.of("MEMBER"), List.of("col_medicine"));
 
 	private static final CurrentUser ADMIN = new CurrentUser("usr_b920fe", UserType.INSTITUTION,
-			"inst_imperial", List.of("MEMBER", "ADMIN"), List.of("col_medicine"));
+			"inst_7f3", List.of("MEMBER", "ADMIN"), List.of("col_medicine"));
 
 	private static final CurrentUser SUBSCRIBER = new CurrentUser("usr_9f01cd", UserType.INDIVIDUAL,
 			null, List.of("SUBSCRIBER"), List.of("col_open"));
@@ -112,13 +112,13 @@ class AuthorizationServiceTest {
 
 		@Test
 		void aMemberReachesTheirOwnInstitutionsResource() {
-			assertThatCode(() -> authorization.requireSameInstitution(MEMBER, "inst_imperial"))
+			assertThatCode(() -> authorization.requireSameInstitution(MEMBER, "inst_7f3"))
 					.doesNotThrowAnyException();
 		}
 
 		@Test
 		void aMemberIsRefusedAnotherInstitutionsResource() {
-			assertThatThrownBy(() -> authorization.requireSameInstitution(MEMBER, "inst_dsu"))
+			assertThatThrownBy(() -> authorization.requireSameInstitution(MEMBER, "inst_ucl"))
 					.isInstanceOf(ApiException.class)
 					.extracting(thrown -> ((ApiException) thrown).getCode())
 					.isEqualTo(ErrorCode.WRONG_INSTITUTION);
@@ -128,7 +128,7 @@ class AuthorizationServiceTest {
 		void anIndividualBelongsToNoInstitutionRatherThanAllOfThem() {
 			// The failure that would matter most: reading "no institution" as "unscoped, so
 			// everything" would hand every institution's data to every individual subscriber.
-			for (String institution : List.of("inst_imperial", "inst_dsu", "inst_xyz")) {
+			for (String institution : List.of("inst_7f3", "inst_ucl", "inst_leeds")) {
 				assertThatThrownBy(() -> authorization.requireSameInstitution(SUBSCRIBER, institution))
 						.describedAs("an individual must not reach %s", institution)
 						.isInstanceOf(ApiException.class)
@@ -160,10 +160,10 @@ class AuthorizationServiceTest {
 
 		@Test
 		void theRefusalDoesNotNameTheOtherInstitution() {
-			// Whether inst_dsu holds a given resource is not something a member of another
+			// Whether inst_ucl holds a given resource is not something a member of another
 			// institution should learn from an error body.
-			assertThatThrownBy(() -> authorization.requireSameInstitution(MEMBER, "inst_dsu"))
-					.hasMessageNotContaining("inst_dsu");
+			assertThatThrownBy(() -> authorization.requireSameInstitution(MEMBER, "inst_ucl"))
+					.hasMessageNotContaining("inst_ucl");
 		}
 
 		@Test

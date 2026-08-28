@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import com.tf.reader.loan.api.ActiveLoanQuery;
 import com.tf.reader.loan.api.ActiveLoanView;
+import com.tf.reader.loan.entity.LicenceModel;
 import com.tf.reader.loan.entity.Loan;
 import com.tf.reader.loan.entity.LoanStatus;
 import com.tf.reader.loan.repository.LoanRepository;
@@ -48,6 +49,14 @@ public class ActiveLoanQueryImpl implements ActiveLoanQuery {
 				.toList();
 	}
 
+	@Override
+	public List<ActiveLoanView> findAllActiveElite() {
+		return loans.findByStatusAndLicenceModel(LoanStatus.ACTIVE, LicenceModel.ELITE).stream()
+				.filter(this::isLive)
+				.map(this::toView)
+				.toList();
+	}
+
 	/** ACTIVE and either open-ended ({@code dueAt == null}) or not yet past its due date. */
 	private boolean isLive(Loan loan) {
 		Instant dueAt = loan.getDueAt();
@@ -60,6 +69,10 @@ public class ActiveLoanQueryImpl implements ActiveLoanQuery {
 				loan.getItemId(),
 				loan.getLicenceModel() == null ? null : loan.getLicenceModel().name(),
 				loan.isCanPersist(),
-				loan.getDueAt());
+				loan.getDueAt(),
+				loan.getInstitutionId(),
+				loan.getLeaseId(),
+				loan.getBorrowedAt(),                                       // D-026
+				loan.getStatus() == null ? null : loan.getStatus().name()); // D-026
 	}
 }

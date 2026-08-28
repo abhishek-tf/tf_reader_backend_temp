@@ -3,11 +3,14 @@ package com.tf.reader.reading.service;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations.TypedTuple;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
@@ -149,6 +152,76 @@ public class CopyLeaseImpl implements CopyLease {
 		String newTokenKey = LeaseKeys.tokenKey(newToken);
 		redis.execute(REASSIGN, List.of(itemKey, oldTokenKey, newTokenKey),
 				fromToken, String.valueOf(until.toEpochMilli()), newToken, itemKey);
+	}
+
+	/**
+	 * Rebuilds one item's lease state from the DB's own truth. Writes every seed, then
+	 * removes whatever Redis holds that the DB doesn't know about — but only once that
+	 * entry has outlived the claim grace window. Only ever called by
+	 * {@link ReconcilerService} — this is not part of the published {@code CopyLease}
+	 * contract, since no caller outside the reading module has a reason to overwrite a
+	 * counter rather than claim against it.
+	 *
+	 * <p>Rebuilding is never a wipe-and-replace: a reader mid-request between {@link #claim}
+	 * and the licence write has a Redis entry with no DB row yet, and that is expected, not
+	 * a defect. Deleting it early would free a slot that is about to be legitimately spent,
+	 * over-lending the title. So an unmatched entry is only ever an orphan once its score is
+	 * further out than a fresh claim's TTL could reach — {@code extend()} is the only other
+	 * caller that pushes a score that far out, and {@code extend} only runs after the licence
+	 * this seed set would already reflect.
+	 *
+	 * @param seeds every token that should be live right now, per the DB
+	 */
+	void rebuild(String scope, String itemId, List<LeaseSeed> seeds, Instant now) {
+		String itemKey = LeaseKeys.itemKey(scope, itemId);
+		Set<String> seeded = new HashSet<>();
+		for (LeaseSeed seed : seeds) {
+			if (seed.expiresAt().isAfter(now)) {
+				seeded.add(seed.token());
+				redis.opsForZSet().add(itemKey, seed.token(), seed.expiresAt().toEpochMilli());
+				redis.opsForValue().set(LeaseKeys.tokenKey(seed.token()), itemKey,
+						Duration.between(now, seed.expiresAt()));
+			}
+		}
+		removeOrphans(itemKey, seeded, now);
+	}
+
+	/**
+	 * Every item key Redis currently holds a counter for — including one with no live DB
+	 * row at all, which is exactly the case {@link #rebuild} must still visit to purge a
+	 * lease nothing backs any more.
+	 */
+	Set<LeaseKeys.Parsed> knownItems() {
+		Set<String> keys = redis.keys(LeaseKeys.ALL_KEYS_PATTERN);
+		if (keys == null) {
+			return Set.of();
+		}
+		Set<LeaseKeys.Parsed> items = new HashSet<>();
+		for (String key : keys) {
+			if (!key.startsWith(LeaseKeys.TOKEN_KEY_PREFIX)) {
+				items.add(LeaseKeys.parseItemKey(key));
+			}
+		}
+		return items;
+	}
+
+	private void removeOrphans(String itemKey, Set<String> seeded, Instant now) {
+		Set<TypedTuple<String>> current = redis.opsForZSet().rangeWithScores(itemKey, 0, -1);
+		if (current == null) {
+			return;
+		}
+		Instant orphanCutoff = now.plus(CLAIM_TTL);
+		for (TypedTuple<String> member : current) {
+			String token = member.getValue();
+			Double score = member.getScore();
+			if (token == null || score == null || seeded.contains(token)) {
+				continue;
+			}
+			if (Instant.ofEpochMilli(score.longValue()).isAfter(orphanCutoff)) {
+				redis.opsForZSet().remove(itemKey, token);
+				redis.delete(LeaseKeys.tokenKey(token));
+			}
+		}
 	}
 
 	@Override

@@ -44,17 +44,14 @@ class RightsServiceTest {
 	}
 
 	@Test
-	void audioIsNeverDownloadableEvenOnSubscription() {
-		assertThatThrownBy(() -> rights.check(AccessLevel.ENTITLED_UNLIMITED, Intent.DOWNLOAD, Format.AUDIO))
-				.isInstanceOf(ApiException.class)
-				.extracting(e -> ((ApiException) e).code())
-				.isEqualTo(ErrorCode.DOWNLOAD_NOT_PERMITTED);
+	void audioDownloadIsAllowedOnSubscriptionJustLikeAnyOtherFormat() {
+		// Format plays no part in this rule — audio rides the exact same tier check as PDF/EPUB.
+		assertThatNoException()
+				.isThrownBy(() -> rights.check(AccessLevel.ENTITLED_UNLIMITED, Intent.DOWNLOAD, Format.AUDIO));
 	}
 
 	@Test
-	void audioOnEliteFailsForTheTierNotJustTheFormat() {
-		// Both rules would refuse this. Asserting the code is enough; which rule fired first
-		// does not matter to the caller.
+	void audioOnEliteIsRefusedForTheTierNotTheFormat() {
 		assertThatThrownBy(() -> rights.check(AccessLevel.ENTITLED_CONCURRENT, Intent.DOWNLOAD, Format.AUDIO))
 				.isInstanceOf(ApiException.class)
 				.extracting(e -> ((ApiException) e).code())

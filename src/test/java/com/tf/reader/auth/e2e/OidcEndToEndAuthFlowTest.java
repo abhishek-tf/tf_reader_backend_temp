@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,12 +24,14 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import com.tf.reader.ContainerisedInfrastructure;
 import com.tf.reader.MockOidcTestProfile;
+import com.tf.reader.auth.AuthTestInstitutions;
 import com.tf.reader.auth.authorization.AuthorizationService;
 import com.tf.reader.auth.model.CurrentUser;
 import com.tf.reader.auth.model.Role;
 import com.tf.reader.auth.model.UserType;
 import com.tf.reader.auth.saml.SamlAuthenticationService;
 import com.tf.reader.auth.transaction.AuthTransactionStore;
+import com.tf.reader.catalogue.repository.InstitutionRepository;
 import com.tf.reader.common.error.ApiException;
 import com.tf.reader.common.error.ErrorCode;
 
@@ -56,9 +59,15 @@ import com.tf.reader.common.error.ErrorCode;
  * <p>The browser is the only thing simulated, and only in the sense that a {@link RestClient}
  * follows the redirect by hand instead of Chrome doing it.
  */
+// spring.profiles.active is forced empty because application.yml defaults it to "local", and a
+// developer's own gitignored application-local.yml (never committed - see CLAUDE.md) points the
+// mock SAML registration theSamlLegIsUntouchedByAnyOfThis checks at their own machine instead of
+// samlmock.dev. The OIDC side of this class is unaffected: MockOidcTestProfile configures it via
+// @DynamicPropertySource, not profile-specific YAML.
 @SpringBootTest(
 		webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
-		properties = { "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET })
+		properties = { "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET,
+				"spring.profiles.active=" })
 class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 
 	/** The claim the mock SAML IdP asserts the email in. A wire contract, so stated literally. */
@@ -93,17 +102,25 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 	@Autowired
 	private AuthorizationService authorization;
 
+	@Autowired
+	private InstitutionRepository institutions;
+
+	@BeforeEach
+	void seedInstitutions() {
+		AuthTestInstitutions.seed(institutions);
+	}
+
 	// ───────────────────────── the whole flow, end to end ─────────────────────────
 
 	@Test
 	void aLocalOidcSignInBecomesAnApplicationJwtThatWorksOnProtectedApis() {
 		// STEP 1 — start. The backend records the institution and mints a state and a nonce.
-		Map<String, Object> start = startSignIn("inst_dsu");
+		Map<String, Object> start = startSignIn("inst_ucl");
 
 		assertThat(start.get("authTxnId").toString()).startsWith("oidcTxn_");
 		assertThat(asMap(start.get("institution")))
-				.containsEntry("institutionId", "inst_dsu")
-				.containsEntry("name", "Dayananda Sagar University");
+				.containsEntry("institutionId", "inst_ucl")
+				.containsEntry("name", "University College London");
 
 		String authorizationUrl = (String) start.get("authorizationUrl");
 		assertThat(authorizationUrl).startsWith(ISSUER + "/oauth2/authorize");
@@ -130,7 +147,7 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 
 		assertThat(asMap(session.get("user")))
 				.containsEntry("userId", "usr_8c14de")
-				.containsEntry("institutionId", "inst_dsu");
+				.containsEntry("institutionId", "inst_ucl");
 		assertThat(session.get("oidcSubject")).isEqualTo("mock-user-001");
 		String token = (String) session.get("token");
 		assertThat(token).isNotBlank();
@@ -141,19 +158,19 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 
 		assertThat(me)
 				.containsEntry("userId", "usr_8c14de")
-				.containsEntry("institutionId", "inst_dsu")
+				.containsEntry("institutionId", "inst_ucl")
 				.containsEntry("type", "INSTITUTION");
 		assertThat(asList(me.get("roles"))).containsExactly("MEMBER");
 		assertThat(asList(me.get("collections"))).containsExactly("col_engineering");
 
 		// STEP 8 — and the authorization decisions that identity supports.
-		CurrentUser asRequested = new CurrentUser("usr_8c14de", UserType.INSTITUTION, "inst_dsu",
+		CurrentUser asRequested = new CurrentUser("usr_8c14de", UserType.INSTITUTION, "inst_ucl",
 				List.of("MEMBER"), List.of("col_engineering"));
 		authorization.requireRole(asRequested, Role.MEMBER);
-		authorization.requireSameInstitution(asRequested, "inst_dsu");
+		authorization.requireSameInstitution(asRequested, "inst_ucl");
 		assertThatThrownBy(() -> authorization.requireRole(asRequested, Role.ADMIN))
 				.isInstanceOf(ApiException.class);
-		assertThatThrownBy(() -> authorization.requireSameInstitution(asRequested, "inst_imperial"))
+		assertThatThrownBy(() -> authorization.requireSameInstitution(asRequested, "inst_7f3"))
 				.isInstanceOf(ApiException.class);
 	}
 
@@ -161,7 +178,7 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 	void theApplicationJwtIsOursAndNotTheProvidersIdToken() {
 		// The requirement stated most plainly. The ID token is consumed at the callback and does
 		// not appear in the response at all; what the client gets is an HS256 token of ours.
-		String body = signInAndReadBody("inst_dsu");
+		String body = signInAndReadBody("inst_ucl");
 
 		assertThat(body).doesNotContain("id_token").doesNotContain("access_token");
 		// HS256, and carrying our claim names rather than the provider's.
@@ -190,8 +207,8 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 		// The same mock user, two sign-ins, two different institutions - and two different
 		// application users, because the institution comes from OUR transaction and the user is
 		// looked up by (email, institution).
-		Map<String, Object> dsu = parse(signInAndReadBody("inst_dsu"));
-		Map<String, Object> imperial = parse(signInAndReadBody("inst_imperial"));
+		Map<String, Object> dsu = parse(signInAndReadBody("inst_ucl"));
+		Map<String, Object> imperial = parse(signInAndReadBody("inst_7f3"));
 
 		assertThat(((Map<String, Object>) dsu.get("user")).get("userId")).isEqualTo("usr_8c14de");
 		assertThat(((Map<String, Object>) imperial.get("user")).get("userId")).isEqualTo("usr_6712ab");
@@ -232,7 +249,7 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 
 		@Test
 		void aCallbackWithAValidStateButNoCodeIsRefused() {
-			String state = stateFrom(startSignIn("inst_dsu"));
+			String state = stateFrom(startSignIn("inst_ucl"));
 
 			assertThat(getForError(REDIRECT_URI + "?state=" + state))
 					.containsEntry("code", "OIDC_AUTHENTICATION_FAILED");
@@ -242,7 +259,7 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 		void theSameCallbackCannotBeUsedTwice() {
 			// Replay. The transaction is single use, so the second attempt finds no sign-in - and
 			// the provider would refuse the code a second time too, which is belt and braces.
-			String callback = callbackUrlFor("inst_dsu");
+			String callback = callbackUrlFor("inst_ucl");
 
 			assertThat(get(callback, Map.class).get("token")).isNotNull();
 			assertThat(getForError(callback)).containsEntry("code", "OIDC_AUTHENTICATION_FAILED");
@@ -253,8 +270,8 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 			// Mixing two flows: a real code from one sign-in, a real state from another. Both
 			// values are genuine; they simply do not belong together, and the nonce in the token
 			// would not match even if the state check somehow passed.
-			String codeFromFirst = queryParam(callbackUrlFor("inst_dsu"), "code");
-			String stateFromSecond = stateFrom(startSignIn("inst_imperial"));
+			String codeFromFirst = queryParam(callbackUrlFor("inst_ucl"), "code");
+			String stateFromSecond = stateFrom(startSignIn("inst_7f3"));
 
 			assertThat(getForError(REDIRECT_URI + "?code=" + codeFromFirst
 					+ "&state=" + stateFromSecond))
@@ -275,7 +292,7 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 
 		@Test
 		void anIdentityWithNoMembershipGetsNoToken() {
-			// inst_xyz has john.doe seeded, so to see this refusal we need an institution the mock
+			// inst_leeds has john.doe seeded, so to see this refusal we need an institution the mock
 			// user is not a member of. All three seeded institutions include john.doe, so this
 			// asserts the shape of the check through a different route: the mapper's own test
 			// covers the unprovisioned case exhaustively, and here we prove the flow surfaces 403
@@ -285,7 +302,7 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 
 		@Test
 		void anUnauthorizedApiRemainsDeniedAfterSomebodyElseSignsIn() {
-			signInAndReadBody("inst_dsu");
+			signInAndReadBody("inst_ucl");
 
 			assertThat(status("/api/v1/auth/me", null)).isEqualTo(401);
 			assertThat(status("/api/v1/library", null)).isEqualTo(401);
@@ -302,8 +319,8 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 			// The convergence the whole design is for. Two protocols, one user store, one userId -
 			// so nothing downstream has to know or care how somebody arrived.
 			var viaSaml = samlAuthentication.complete(samlAuthentication("john.doe@example.com"),
-					samlTransactions.open("inst_dsu").id());
-			Map<String, Object> viaOidc = asMap(parse(signInAndReadBody("inst_dsu")).get("user"));
+					samlTransactions.open("inst_ucl").id());
+			Map<String, Object> viaOidc = asMap(parse(signInAndReadBody("inst_ucl")).get("user"));
 
 			assertThat(viaOidc.get("userId")).isEqualTo(viaSaml.user().userId());
 			assertThat(viaOidc.get("institutionId")).isEqualTo(viaSaml.user().institutionId());
@@ -313,23 +330,28 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 		@Test
 		void bothTokensAuthenticateTheSameProtectedEndpointIdentically() {
 			String samlToken = samlAuthentication.complete(samlAuthentication("john.doe@example.com"),
-					samlTransactions.open("inst_imperial").id()).token();
-			String oidcToken = (String) parse(signInAndReadBody("inst_imperial")).get("token");
+					samlTransactions.open("inst_7f3").id()).token();
+			String oidcToken = (String) parse(signInAndReadBody("inst_7f3")).get("token");
 
 			for (String token : List.of(samlToken, oidcToken)) {
 				@SuppressWarnings("unchecked")
 		Map<String, Object> me = get("/api/v1/auth/me", Map.class, token);
 				assertThat(me).containsEntry("userId", "usr_6712ab")
-						.containsEntry("institutionId", "inst_imperial");
+						.containsEntry("institutionId", "inst_7f3");
 			}
 		}
 
 		@Test
 		void bothStartEndpointsReturnTheSameEnvelope() {
 			// The contract requires it: the app routes on the sign-in method and then writes one
-			// flow. Same field names, different authorization url.
-			Map<String, Object> saml = post("/api/v1/auth/saml/start", "{\"institutionId\":\"inst_dsu\"}");
-			Map<String, Object> oidc = startSignIn("inst_dsu");
+			// flow. Same field names, different authorization url. SAML now takes institutionId
+			// as a query parameter (the RN integration shape) while OIDC still takes a body -
+			// the two no longer share a request shape, only a response one.
+			@SuppressWarnings("unchecked")
+			Map<String, Object> saml = http.post()
+					.uri(uri("/api/v1/auth/saml/start?institutionId=inst_ucl"))
+					.retrieve().body(Map.class);
+			Map<String, Object> oidc = startSignIn("inst_ucl");
 
 			assertThat(oidc.keySet()).isEqualTo(saml.keySet());
 			assertThat((String) saml.get("authorizationUrl")).startsWith("/saml2/authenticate");
@@ -340,7 +362,7 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 		void theTwoTransactionStoresDoNotShareIds() {
 			// SAML and OIDC keep separate stores - OIDC's carries a nonce, which has no SAML
 			// analogue. A SAML transaction id must therefore be meaningless to the OIDC callback.
-			String samlTxn = samlTransactions.open("inst_dsu").id();
+			String samlTxn = samlTransactions.open("inst_ucl").id();
 
 			assertThat(getForError(REDIRECT_URI + "?code=x&state=" + samlTxn))
 					.containsEntry("code", "OIDC_AUTHENTICATION_FAILED");
@@ -349,7 +371,7 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 		@Test
 		void theSamlLegIsUntouchedByAnyOfThis() {
 			// The SAML entry point still redirects to its own IdP, carrying its own RelayState.
-			String txn = samlTransactions.open("inst_imperial").id();
+			String txn = samlTransactions.open("inst_7f3").id();
 
 			String location = http.get()
 					.uri(uri("/saml2/authenticate?registrationId=tf-reader&authTxn=" + txn))
@@ -383,7 +405,7 @@ class OidcEndToEndAuthFlowTest extends MockOidcTestProfile {
 
 	/** The provider's ID token, obtained by running a flow and exchanging the code ourselves. */
 	private String idTokenFromAFullFlow() {
-		String code = queryParam(callbackUrlFor("inst_dsu"), "code");
+		String code = queryParam(callbackUrlFor("inst_ucl"), "code");
 
 		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
 		form.add("grant_type", "authorization_code");

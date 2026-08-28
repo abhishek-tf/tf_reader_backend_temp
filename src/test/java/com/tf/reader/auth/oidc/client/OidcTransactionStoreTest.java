@@ -29,9 +29,9 @@ class OidcTransactionStoreTest {
 
 	@Test
 	void openingATransactionRecordsTheInstitutionWithAStateAndANonce() {
-		OidcTransaction transaction = store.open("inst_dsu");
+		OidcTransaction transaction = store.open("inst_ucl");
 
-		assertThat(transaction.institutionId()).isEqualTo("inst_dsu");
+		assertThat(transaction.institutionId()).isEqualTo("inst_ucl");
 		assertThat(transaction.id()).startsWith("oidcTxn_");
 		assertThat(transaction.state()).isNotBlank();
 		assertThat(transaction.nonce()).isNotBlank();
@@ -43,7 +43,7 @@ class OidcTransactionStoreTest {
 	void theIdTheStateAndTheNonceAreThreeDifferentValues() {
 		// The id is handed to the client; the state goes to the provider; the nonce goes into the
 		// token. If any two were the same value, a party who saw one would hold another.
-		OidcTransaction transaction = store.open("inst_dsu");
+		OidcTransaction transaction = store.open("inst_ucl");
 
 		assertThat(transaction.state()).isNotEqualTo(transaction.id());
 		assertThat(transaction.nonce()).isNotEqualTo(transaction.state());
@@ -57,7 +57,7 @@ class OidcTransactionStoreTest {
 		// somebody swaps in a counter or a timestamp.
 		Set<String> values = new HashSet<>();
 		for (int i = 0; i < 500; i++) {
-			OidcTransaction transaction = store.open("inst_dsu");
+			OidcTransaction transaction = store.open("inst_ucl");
 			values.add(transaction.state());
 			values.add(transaction.nonce());
 			values.add(transaction.id());
@@ -68,7 +68,7 @@ class OidcTransactionStoreTest {
 	@Test
 	void aTransactionIsFoundByItsStateAndNotByItsId() {
 		// The callback carries state. The id never comes back and is not a credential.
-		OidcTransaction transaction = store.open("inst_dsu");
+		OidcTransaction transaction = store.open("inst_ucl");
 
 		assertThat(store.consume(transaction.id())).isEmpty();
 		assertThat(store.consume(transaction.state())).contains(transaction);
@@ -77,7 +77,7 @@ class OidcTransactionStoreTest {
 	@Test
 	void aTransactionCanBeConsumedOnlyOnce() {
 		// Single use, which is what stops a replayed callback starting a second session.
-		OidcTransaction transaction = store.open("inst_imperial");
+		OidcTransaction transaction = store.open("inst_7f3");
 
 		assertThat(store.consume(transaction.state())).isPresent();
 		assertThat(store.consume(transaction.state())).isEmpty();
@@ -85,7 +85,7 @@ class OidcTransactionStoreTest {
 
 	@Test
 	void anExpiredTransactionIsRefused() {
-		OidcTransaction transaction = store.open("inst_imperial");
+		OidcTransaction transaction = store.open("inst_7f3");
 		clock.advance(Duration.ofMinutes(11));
 
 		assertThat(store.consume(transaction.state())).isEmpty();
@@ -94,7 +94,7 @@ class OidcTransactionStoreTest {
 	@Test
 	void aTransactionInsideItsLifetimeIsAccepted() {
 		// Guards the guard: a store that refused everything would pass the expiry test above.
-		OidcTransaction transaction = store.open("inst_imperial");
+		OidcTransaction transaction = store.open("inst_7f3");
 		clock.advance(Duration.ofMinutes(9));
 
 		assertThat(store.consume(transaction.state())).isPresent();
@@ -102,7 +102,7 @@ class OidcTransactionStoreTest {
 
 	@Test
 	void expiryIsInclusiveAtTheBoundary() {
-		OidcTransaction transaction = store.open("inst_imperial");
+		OidcTransaction transaction = store.open("inst_7f3");
 		clock.advance(Duration.ofMinutes(10));
 
 		assertThat(store.consume(transaction.state())).isEmpty();
@@ -125,7 +125,7 @@ class OidcTransactionStoreTest {
 				new OidcProperties(null, null, "https://issuer", null, null, null, null, null,
 						Duration.ofMinutes(2), null));
 
-		OidcTransaction transaction = shortLived.open("inst_dsu");
+		OidcTransaction transaction = shortLived.open("inst_ucl");
 
 		assertThat(transaction.expiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(2)));
 	}
@@ -136,12 +136,12 @@ class OidcTransactionStoreTest {
 		// would leave an entry behind for good. Nothing else evicts: there is no scheduler here,
 		// exactly as in AuthTransactionStore.
 		for (int i = 0; i < OidcTransactionStore.EVICT_ABOVE; i++) {
-			store.open("inst_dsu");
+			store.open("inst_ucl");
 		}
 		assertThat(store.inFlight()).isEqualTo(OidcTransactionStore.EVICT_ABOVE);
 
 		clock.advance(Duration.ofMinutes(11));
-		store.open("inst_dsu");
+		store.open("inst_ucl");
 
 		assertThat(store.inFlight()).isEqualTo(1);
 	}
@@ -149,11 +149,11 @@ class OidcTransactionStoreTest {
 	@Test
 	void sweepingNeverDropsATransactionSomebodyIsStillUsing() {
 		for (int i = 0; i < OidcTransactionStore.EVICT_ABOVE; i++) {
-			store.open("inst_dsu");
+			store.open("inst_ucl");
 		}
 		clock.advance(Duration.ofMinutes(11));
 
-		OidcTransaction current = store.open("inst_imperial");
+		OidcTransaction current = store.open("inst_7f3");
 
 		assertThat(store.consume(current.state())).isPresent();
 	}

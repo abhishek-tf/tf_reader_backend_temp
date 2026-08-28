@@ -1,5 +1,6 @@
 package com.tf.reader.hold.service;
 
+import com.tf.reader.catalogue.api.AccessLevel;
 import com.tf.reader.catalogue.api.EntitlementDecision;
 import com.tf.reader.catalogue.api.EntitlementQuery;
 import com.tf.reader.catalogue.api.SubjectRef;
@@ -8,38 +9,49 @@ import com.tf.reader.common.error.ErrorCode;
 import com.tf.reader.auth.model.CurrentUser;
 import com.tf.reader.hold.api.HoldView;
 import com.tf.reader.hold.api.OfferView;
+import com.tf.reader.hold.dto.AcceptedLoanResponse;
 import com.tf.reader.hold.entity.Hold;
 import com.tf.reader.hold.entity.HoldStatus;
 import com.tf.reader.hold.repository.HoldRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.tf.reader.hold.repository.HoldWrites;
+import com.tf.reader.library.api.ChangeLog;
+import com.tf.reader.library.api.ChangeReason;
+import com.tf.reader.library.api.ChangeRecord;
+import com.tf.reader.loan.api.LicenceCommand;
+import com.tf.reader.loan.api.LicenceView;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
-// Maintains the ordered wait queue for a title. join and holdsFor today —
-// leave and accept land once promotion and the copy lease exist. Position
-// and queueLength are always computed here, on read, from Redis — never
-// stored.
+// Maintains the ordered wait queue for a title — join, leave, accept and
+// holdsFor. Position and queueLength are always computed here, on read,
+// from Redis — never stored.
 @Service
 public class QueueService {
 
-    private static final Logger log = LoggerFactory.getLogger(QueueService.class);
-
     private final HoldRepository holds;
+    private final HoldWrites writes;
     private final StringRedisTemplate redis;
     private final EntitlementQuery entitlements;
+    private final PromotionService promotion;
+    private final LicenceCommand loans;
+    private final ChangeLog changeLog;
     private final Clock clock;
 
-    public QueueService(HoldRepository holds, StringRedisTemplate redis,
-                         EntitlementQuery entitlements, Clock clock) {
+    public QueueService(HoldRepository holds, HoldWrites writes, StringRedisTemplate redis, EntitlementQuery entitlements,
+                         PromotionService promotion, LicenceCommand loans, ChangeLog changeLog, Clock clock) {
         this.holds = holds;
+        this.writes = writes;
         this.redis = redis;
         this.entitlements = entitlements;
+        this.promotion = promotion;
+        this.loans = loans;
+        this.changeLog = changeLog;
         this.clock = clock;
     }
 
@@ -81,8 +93,47 @@ public class QueueService {
         }
 
         redis.opsForZSet().add(QueueKeys.queueKey(scope, itemId), QueueKeys.member(me.userId()), ticket);
-        log.info("HOLD_PLACED user={} item={}", me.userId(), itemId); // becomes ChangeLog.record() once the port exists
+        changeLog.record(ChangeRecord.forHold(me.userId(), ChangeReason.HOLD_PLACED, itemId, saved.getHoldId(), clock.instant()));
         return new Placed(viewOf(saved, decision), true);
+    }
+
+    public void leave(CurrentUser me, String holdId) {
+        // Cancelling an already-cancelled hold, or a holdId that was never
+        // yours, both touch nothing here — the reader asked for it to be
+        // gone and it is, so this is always a no-op success, never a 404.
+        writes.deleteOwn(holdId, me.userId()).ifPresent(hold -> {
+            redis.opsForZSet().remove(QueueKeys.queueKey(hold.getScope(), hold.getItemId()),
+                    QueueKeys.member(hold.getUserId()));
+            if (hold.getStatus() == HoldStatus.OFFERED) {
+                // Reassign, not release-then-acquire — the copy must never
+                // look free for even an instant, or a passing reader could
+                // take a slot someone else is queued for.
+                promotion.promoteNext(hold.getScope(), hold.getItemId(), hold.getOffer().getLeaseToken());
+            }
+            changeLog.record(ChangeRecord.forHold(hold.getUserId(), ChangeReason.HOLD_CANCELLED, hold.getItemId(), hold.getHoldId(), clock.instant()));
+        });
+    }
+
+    public AcceptedLoanResponse accept(CurrentUser me, String holdId) {
+        // OFFERED and the deadline still in the future, or nothing — a
+        // stranger's guess, an already-accepted hold and a genuinely lapsed
+        // offer all collapse into the same honest refusal: there is no live
+        // offer for you to accept right now.
+        Hold hold = writes.claimIfLive(holdId, me.userId(), clock.instant())
+                .orElseThrow(() -> new ApiException(ErrorCode.OFFER_EXPIRED, "This offer is no longer live"));
+
+        SubjectRef subject = new SubjectRef(me.userId(), hold.getScope());
+        EntitlementDecision decision = entitlements.check(subject, hold.getItemId());
+        LicenceView licence = loans.create(subject, hold.getItemId(),
+                AccessLevel.ENTITLED_CONCURRENT, decision.loanPeriodDays(), hold.getOffer().getLeaseToken());
+
+        Instant now = clock.instant();
+        // The offer becoming a loan is a loan-created event, not a hold event —
+        // there's no HOLD_ACCEPTED reason on the wire, and this is the only
+        // place that knows the new loanId.
+        changeLog.record(ChangeRecord.forLoan(me.userId(), ChangeReason.LOAN_CREATED, hold.getItemId(), licence.licenceId(), now));
+        return new AcceptedLoanResponse(licence.licenceId(), subject.userId(), subject.institutionId(), licence.itemId(),
+                "ELITE", "ACTIVE", licence.canPersist(), now, licence.expiresAt(), now);
     }
 
     public List<HoldView> holdsFor(String userId) {

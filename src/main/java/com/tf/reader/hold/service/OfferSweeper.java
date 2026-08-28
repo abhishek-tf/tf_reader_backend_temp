@@ -4,6 +4,9 @@ import com.tf.reader.hold.entity.Hold;
 import com.tf.reader.hold.entity.HoldStatus;
 import com.tf.reader.hold.repository.HoldRepository;
 import com.tf.reader.hold.repository.HoldWrites;
+import com.tf.reader.library.api.ChangeLog;
+import com.tf.reader.library.api.ChangeReason;
+import com.tf.reader.library.api.ChangeRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -25,14 +28,16 @@ public class OfferSweeper {
     private final HoldWrites writes;
     private final StringRedisTemplate redis;
     private final PromotionService promotion;
+    private final ChangeLog changeLog;
     private final Clock clock;
 
     public OfferSweeper(HoldRepository holds, HoldWrites writes, StringRedisTemplate redis,
-                         PromotionService promotion, Clock clock) {
+                         PromotionService promotion, ChangeLog changeLog, Clock clock) {
         this.holds = holds;
         this.writes = writes;
         this.redis = redis;
         this.promotion = promotion;
+        this.changeLog = changeLog;
         this.clock = clock;
     }
 
@@ -58,7 +63,8 @@ public class OfferSweeper {
         writes.expireIfLapsed(holdId, now).ifPresent(expired -> {
             String queueKey = QueueKeys.queueKey(expired.getScope(), expired.getItemId());
             redis.opsForZSet().remove(queueKey, QueueKeys.member(expired.getUserId()));
-            log.info("HOLD_OFFER_EXPIRED user={} item={}", expired.getUserId(), expired.getItemId());
+            changeLog.record(ChangeRecord.forHold(expired.getUserId(), ChangeReason.HOLD_OFFER_EXPIRED,
+                    expired.getItemId(), expired.getHoldId(), now));
 
             // They rejoin at the back, not the front, if they want back in —
             // holding a place for somebody who didn't answer is no queue at all.

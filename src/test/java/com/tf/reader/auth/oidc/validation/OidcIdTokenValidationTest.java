@@ -49,9 +49,15 @@ import com.tf.reader.common.error.ErrorCode;
 // DEFINED_PORT, because two hops here are real HTTP: the decoder fetches the provider's JWKS to
 // verify a signature. Under MockMvc there is nothing listening and every positive case would fail
 // for a reason that has nothing to do with token validation.
+//
+// The properties here must match OidcEndToEndAuthFlowTest's exactly: both extend
+// MockOidcTestProfile and so share its static PORT, and Spring only reuses one real server for
+// both when their context configuration - these properties included - is identical. Diverge and
+// both try to bind that same port in the same JVM.
 @SpringBootTest(
 		webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
-		properties = { "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET })
+		properties = { "tnf.auth.jwt.secret=" + ContainerisedInfrastructure.JWT_SECRET,
+				"spring.profiles.active=" })
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class OidcIdTokenValidationTest extends MockOidcTestProfile {
 
@@ -85,7 +91,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 
 	@Test
 	void aTokenSignedByTheProviderIsAccepted() {
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 
 		Jwt verified = validator.validate(providerSigned(claims(transaction.nonce())), transaction);
 
@@ -100,7 +106,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 	void aTokenSignedByAnybodyElseIsRefused() {
 		// The check that matters most. Without it an ID token is a base64 string anybody can write,
 		// naming any user in the directory. Note how little is wrong with this token: only the key.
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 
 		assertRefused(signedWith(impostorKey, claims(transaction.nonce())), transaction);
 	}
@@ -109,7 +115,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 	void aTokenWithATamperedPayloadIsRefused() {
 		// Re-encoding the payload of a legitimately signed token breaks the signature, so the email
 		// a user is looked up by cannot be swapped for somebody else's.
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 		String[] parts = providerSigned(claims(transaction.nonce())).split("\\.");
 		String payload = new String(java.util.Base64.getUrlDecoder().decode(parts[1]),
 				java.nio.charset.StandardCharsets.UTF_8);
@@ -126,7 +132,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 	void anUnsignedTokenIsRefused() {
 		// alg=none. The decoder is pinned to RS256, so a token claiming no algorithm is not
 		// "trivially valid" - it is unreadable.
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 		String unsigned = base64("{\"alg\":\"none\"}") + "."
 				+ base64("{\"iss\":\"" + ISSUER + "\",\"aud\":\"" + CLIENT_ID + "\"}") + ".";
 
@@ -135,7 +141,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 
 	@Test
 	void aTokenThatIsNotAJwtAtAllIsRefused() {
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 
 		for (String rubbish : new String[] { "not-a-jwt", "..", "a.b.c", "" }) {
 			assertRefused(rubbish, transaction);
@@ -147,7 +153,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 		// A token response with no id_token means a provider configured without the openid scope.
 		// Signing somebody in on the access token instead would be signing them in on an
 		// authorization grant that asserts nothing about who they are.
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 
 		assertRefused(null, transaction);
 	}
@@ -159,7 +165,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 		// Signed by the real provider key, but claiming to come from somebody else. This is the
 		// check Spring's own OidcIdTokenValidator SKIPS when a registration has no issuerUri -
 		// which is always, for Azure AD B2C - and the reason OidcIdTokenDecoder adds it explicitly.
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 		JWTClaimsSet.Builder claims = claims(transaction.nonce())
 				.issuer("https://attacker.example.com/v2.0/");
 
@@ -168,7 +174,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 
 	@Test
 	void aTokenWithNoIssuerIsRefused() {
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 		JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
 				.subject("mock-user-001")
 				.audience(CLIENT_ID)
@@ -186,7 +192,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 	void aTokenIssuedForAnotherApplicationIsRefused() {
 		// aud is our client id. A token the provider minted for a different application is signed
 		// by the same key and would otherwise verify perfectly.
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 		JWTClaimsSet.Builder claims = claims(transaction.nonce()).audience("some-other-application");
 
 		assertRefused(providerSigned(claims), transaction);
@@ -194,7 +200,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 
 	@Test
 	void aTokenWithNoAudienceIsRefused() {
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 		JWTClaimsSet.Builder claims = claims(transaction.nonce()).audience(java.util.List.of());
 
 		assertRefused(providerSigned(claims), transaction);
@@ -205,7 +211,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 		// aud MAY be an array, and ours being in it is what the specification asks. Pinned so the
 		// check stays "contains" rather than drifting to "equals" and breaking a conforming
 		// provider.
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 		JWTClaimsSet.Builder claims = claims(transaction.nonce())
 				.audience(java.util.List.of("another-app", CLIENT_ID));
 
@@ -216,7 +222,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 
 	@Test
 	void anExpiredTokenIsRefused() {
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 		// Five minutes past, comfortably beyond the 60 seconds of clock skew Nimbus allows by
 		// default - unlike our own tokens, where we are the only issuer and verifier and
 		// TnfJwtValidator allows none, here there genuinely are two clocks.
@@ -234,8 +240,8 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 		// The nonce check, and the reason it exists even though state already matched. This token
 		// is real: right key, right issuer, right audience, not expired. It simply belongs to a
 		// different authorization request - which is precisely a replay.
-		OidcTransaction ours = transactions.open("inst_dsu");
-		OidcTransaction somebodyElses = transactions.open("inst_imperial");
+		OidcTransaction ours = transactions.open("inst_ucl");
+		OidcTransaction somebodyElses = transactions.open("inst_7f3");
 
 		assertRefused(providerSigned(claims(somebodyElses.nonce())), ours);
 	}
@@ -244,7 +250,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 	void aTokenWithNoNonceIsRefused() {
 		// Absent must be a failure, not a pass. "If the value is present, compare it" is the shape
 		// of this check that does nothing: a token minted without a nonce sails straight through it.
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 		JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
 				.issuer(ISSUER)
 				.subject("mock-user-001")
@@ -258,7 +264,7 @@ class OidcIdTokenValidationTest extends MockOidcTestProfile {
 
 	@Test
 	void anEmptyNonceDoesNotMatchAnything() {
-		OidcTransaction transaction = transactions.open("inst_dsu");
+		OidcTransaction transaction = transactions.open("inst_ucl");
 
 		assertRefused(providerSigned(claims(transaction.nonce()).claim("nonce", "")), transaction);
 	}

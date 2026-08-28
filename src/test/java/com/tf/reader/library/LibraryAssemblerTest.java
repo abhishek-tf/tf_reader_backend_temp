@@ -62,8 +62,8 @@ class LibraryAssemblerTest {
 		givenHolds();
 		givenLoans(
 				new ActiveLoanView("loan_7c1", "item_42", "ELITE", false,
-						NOW.plus(13, ChronoUnit.DAYS)),
-				new ActiveLoanView("loan_oa9", "item_oa9", "OPEN_ACCESS", true, null));
+						NOW.plus(13, ChronoUnit.DAYS), null, null, NOW.minus(1, ChronoUnit.DAYS), "ACTIVE"),
+				new ActiveLoanView("loan_oa9", "item_oa9", "OPEN_ACCESS", true, null, null, null, NOW.minus(9, ChronoUnit.DAYS), "ACTIVE"));
 
 		LibraryResponse response = assembler.assemble(READER);
 
@@ -73,16 +73,44 @@ class LibraryAssemblerTest {
 	}
 
 	@Test
-	@DisplayName("every loan from this seam is ACTIVE, because the seam only returns live ones")
-	void statusIsAlwaysActive() {
+	@DisplayName("status is forwarded from the view, not invented here")
+	void statusComesFromTheSeam() {
 		givenCursor(ChangeCursor.of(4L));
 		givenHolds();
-		givenLoans(new ActiveLoanView("loan_7c1", "item_42", "ELITE", false,
-				NOW.plus(13, ChronoUnit.DAYS)));
+		givenLoans(loan("loan_7c1", "item_42", "ACTIVE"));
 
-		// ActiveLoanView carries no status field and does not need one: findAllFor applies the D-006
-		// liveness rule, so a lapsed-but-unswept row never reaches here.
+		// Read from the view since D-026 rather than hard-coded, so there is one source of truth for
+		// what a loan's status is.
 		assertThat(assembler.assemble(READER).loans().get(0).status()).isEqualTo("ACTIVE");
+	}
+
+	@Test
+	@DisplayName("a loan the seam should not have returned is dropped, not rendered")
+	void dropsANonLiveLoan() {
+		givenCursor(ChangeCursor.of(4L));
+		givenHolds();
+		givenLoans(
+				loan("loan_ok", "item_42", "ACTIVE"),
+				loan("loan_gone", "item_oa9", "RETURNED"),
+				loan("loan_lapsed", "item_env", "EXPIRED"));
+
+		// Reading status from the view traded a guarantee for trust: before D-026 a closed loan could
+		// not reach the shelf by construction. A returned loan rendered as one the reader still holds
+		// is the harmful case — they tap it and get a refusal instead of a book.
+		assertThat(assembler.assemble(READER).loans())
+				.extracting("loanId").containsExactly("loan_ok");
+	}
+
+	@Test
+	@DisplayName("one bad row does not blank the shelf")
+	void oneBadRowDoesNotCostTheWholeShelf() {
+		givenCursor(ChangeCursor.of(4L));
+		givenHolds();
+		givenLoans(loan("loan_gone", "item_oa9", "RETURNED"), loan("loan_ok", "item_42", "ACTIVE"));
+
+		// Failing the whole request would replace one wrong row with an empty screen, which is worse
+		// for a reader who has nine other books. The drop is logged at error instead.
+		assertThat(assembler.assemble(READER).loans()).hasSize(1);
 	}
 
 	@Test
@@ -92,8 +120,8 @@ class LibraryAssemblerTest {
 		givenHolds();
 		givenLoans(
 				new ActiveLoanView("loan_7c1", "item_42", "ELITE", false,
-						NOW.plus(13, ChronoUnit.DAYS)),
-				new ActiveLoanView("loan_oa9", "item_oa9", "OPEN_ACCESS", true, null));
+						NOW.plus(13, ChronoUnit.DAYS), null, null, NOW.minus(1, ChronoUnit.DAYS), "ACTIVE"),
+				new ActiveLoanView("loan_oa9", "item_oa9", "OPEN_ACCESS", true, null, null, null, NOW.minus(9, ChronoUnit.DAYS), "ACTIVE"));
 
 		LibraryResponse response = assembler.assemble(READER);
 
@@ -104,17 +132,15 @@ class LibraryAssemblerTest {
 	}
 
 	@Test
-	@DisplayName("borrowedAt is omitted, because the seam does not publish it")
-	void borrowedAtHasNoSourceYet() {
+	@DisplayName("borrowedAt is now populated from the seam (D-026)")
+	void borrowedAtIsPopulatedFromTheSeam() {
 		givenCursor(ChangeCursor.of(4L));
 		givenHolds();
+		Instant borrowed = NOW.minus(1, ChronoUnit.DAYS);
 		givenLoans(new ActiveLoanView("loan_7c1", "item_42", "ELITE", false,
-				NOW.plus(13, ChronoUnit.DAYS)));
+				NOW.plus(13, ChronoUnit.DAYS), null, null, borrowed, "ACTIVE"));
 
-		// Null rather than invented. The frozen response shape has the field, so this is the gap to
-		// close with the loan lane: it is agreed that borrowedAt joins ActiveLoanView, and when it
-		// does this assertion flips to isNotNull.
-		assertThat(assembler.assemble(READER).loans().get(0).borrowedAt()).isNull();
+		assertThat(assembler.assemble(READER).loans().get(0).borrowedAt()).isEqualTo(borrowed);
 	}
 
 	@Test
@@ -241,6 +267,12 @@ class LibraryAssemblerTest {
 
 	private void givenCursor(ChangeCursor cursor) {
 		when(changeFeed.currentCursor(READER.userId())).thenReturn(cursor);
+	}
+
+	/** A live, dated loan with the given status — the nine-component view since D-026. */
+	private static ActiveLoanView loan(String loanId, String itemId, String status) {
+		return new ActiveLoanView(loanId, itemId, "ELITE", false,
+				NOW.plus(13, ChronoUnit.DAYS), null, null, NOW.minus(1, ChronoUnit.DAYS), status);
 	}
 
 	private void givenLoans(ActiveLoanView... loans) {

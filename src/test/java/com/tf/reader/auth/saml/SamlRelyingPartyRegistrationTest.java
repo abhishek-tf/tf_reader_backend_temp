@@ -29,7 +29,12 @@ class SamlRelyingPartyRegistrationTest {
 			.withConfiguration(AutoConfigurations.of(SecurityAutoConfiguration.class,
 					ServletWebSecurityAutoConfiguration.class, Saml2RelyingPartyAutoConfiguration.class))
 			// Loads the real application.yml, so this fails if that file drifts.
-			.withInitializer(new ConfigDataApplicationContextInitializer());
+			.withInitializer(new ConfigDataApplicationContextInitializer())
+			// application.yml defaults spring.profiles.active to local, and a developer's own
+			// gitignored application-local.yml (never committed - see CLAUDE.md) points the mock
+			// registration at their own machine instead of samlmock.dev. Suppressing that profile
+			// here is what makes this test see the same config on every machine and in CI.
+			.withPropertyValues("spring.profiles.active=");
 
 	@Test
 	void thereIsExactlyOneRegistrationAndEveryInstitutionSharesIt() {

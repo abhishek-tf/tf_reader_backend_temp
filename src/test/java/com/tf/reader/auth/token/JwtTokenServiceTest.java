@@ -31,7 +31,7 @@ class JwtTokenServiceTest {
 	private static final String SECRET = "a-test-only-signing-secret-of-sufficient-length-0123456789";
 
 	private static final TnfUser MEMBER = new TnfUser("usr_6712ab", UserType.INSTITUTION,
-			"inst_imperial", List.of("MEMBER"), List.of("col_medicine"));
+			"inst_7f3", List.of("MEMBER"), List.of("col_medicine"));
 
 	private final TokenService tokenService =
 			JwtTokenService.forTest(SECRET, Duration.ofHours(1), Clock.fixed(NOW, ZoneOffset.UTC));
@@ -72,7 +72,7 @@ class JwtTokenServiceTest {
 
 		assertThat(jwt.getClaimAsString("userId")).isEqualTo("usr_6712ab");
 		assertThat(jwt.getClaimAsString("type")).isEqualTo("INSTITUTION");
-		assertThat(jwt.getClaimAsString("institutionId")).isEqualTo("inst_imperial");
+		assertThat(jwt.getClaimAsString("institutionId")).isEqualTo("inst_7f3");
 		assertThat(jwt.getClaimAsStringList("roles")).containsExactly("MEMBER");
 		assertThat(jwt.getClaimAsStringList("collections")).containsExactly("col_medicine");
 	}
@@ -136,13 +136,13 @@ class JwtTokenServiceTest {
 	void everyClaimComesFromTheUserObjectAndNowhereElse() {
 		// Two users differing only in their fields produce tokens differing only in those
 		// claims: nothing is read from ambient state, a request, or a thread local.
-		TnfUser other = new TnfUser("usr_8c14de", UserType.INSTITUTION, "inst_dsu",
+		TnfUser other = new TnfUser("usr_8c14de", UserType.INSTITUTION, "inst_ucl",
 				List.of("MEMBER", "ADMIN"), List.of("col_engineering"));
 
 		Jwt jwt = decode(other);
 
 		assertThat(jwt.getClaimAsString("userId")).isEqualTo("usr_8c14de");
-		assertThat(jwt.getClaimAsString("institutionId")).isEqualTo("inst_dsu");
+		assertThat(jwt.getClaimAsString("institutionId")).isEqualTo("inst_ucl");
 		assertThat(jwt.getClaimAsStringList("roles")).containsExactly("MEMBER", "ADMIN");
 	}
 

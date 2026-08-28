@@ -12,9 +12,10 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import com.tf.reader.auth.model.Institution;
 import com.tf.reader.auth.model.TnfUser;
-import com.tf.reader.auth.repository.MockInstitutionRepository;
 import com.tf.reader.auth.token.IssuedToken;
 import com.tf.reader.auth.token.TokenService;
+import com.tf.reader.catalogue.api.InstitutionLookup;
+import com.tf.reader.catalogue.api.InstitutionRef;
 import com.tf.reader.common.error.ApiException;
 import com.tf.reader.common.error.ErrorCode;
 
@@ -49,7 +50,7 @@ public class OidcAuthenticationService {
 			org.slf4j.LoggerFactory.getLogger(OidcAuthenticationService.class);
 
 	private final OidcTransactionStore transactions;
-	private final MockInstitutionRepository institutions;
+	private final InstitutionLookup institutions;
 	private final OidcTokenClient tokenClient;
 	private final OidcIdTokenValidator idTokenValidator;
 	private final OidcUserMapper userMapper;
@@ -58,7 +59,7 @@ public class OidcAuthenticationService {
 	private final Clock clock;
 
 	public OidcAuthenticationService(OidcTransactionStore transactions,
-			MockInstitutionRepository institutions, OidcTokenClient tokenClient,
+			InstitutionLookup institutions, OidcTokenClient tokenClient,
 			OidcIdTokenValidator idTokenValidator, OidcUserMapper userMapper,
 			TokenService tokenService, OidcProperties properties, Clock clock) {
 		this.transactions = transactions;
@@ -81,9 +82,10 @@ public class OidcAuthenticationService {
 	 * @throws ApiException 404 if no such institution exists
 	 */
 	public OidcStartResponse start(String institutionId) {
-		Institution institution = institutions.find(institutionId)
+		InstitutionRef institutionRef = institutions.find(institutionId)
 				.orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND,
 						"No institution is registered with id '" + institutionId + "'."));
+		Institution institution = new Institution(institutionRef.institutionId(), institutionRef.name());
 
 		OidcTransaction transaction = transactions.open(institution.institutionId());
 		log.info("OIDC transaction created: {} for institution {}",
@@ -146,9 +148,10 @@ public class OidcAuthenticationService {
 		// STEP 4 - the institution is recovered from OUR transaction. One provider serves every
 		// institution, so no claim can tell us which one this is - and if the client could, it
 		// could pick any of them.
-		Institution institution = institutions.find(transaction.institutionId())
+		InstitutionRef institutionRef = institutions.find(transaction.institutionId())
 				.orElseThrow(() -> new ApiException(ErrorCode.OIDC_AUTHENTICATION_FAILED,
 						"The institution this sign-in was started for no longer exists."));
+		Institution institution = new Institution(institutionRef.institutionId(), institutionRef.name());
 
 		// STEP 5 - who that is, here.
 		TnfUser user = userMapper.map(idToken, institution.institutionId());

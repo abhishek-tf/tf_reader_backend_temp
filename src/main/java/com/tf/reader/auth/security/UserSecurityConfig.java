@@ -127,6 +127,9 @@ public class UserSecurityConfig {
 						// OIDC: start cannot require a token; callback is a browser redirect from IdP
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/oidc/start").permitAll()
 						.requestMatchers(HttpMethod.GET, "/api/v1/auth/oidc/callback").permitAll()
+						// Authenticated by the opaque code/refresh token in the body, not a bearer JWT.
+						.requestMatchers(HttpMethod.POST, "/api/v1/auth/token").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
 						.anyRequest().authenticated())
 				// Every request after sign-in presents the JWT that sign-in produced. Spring
 				// Security's own bearer-token filter does the header parsing and the decoding, so

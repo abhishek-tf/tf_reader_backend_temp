@@ -59,7 +59,7 @@ public class BorrowService implements LicenceCommand {
 		Optional<Loan> existing =
 				loanRepository.findByUserIdAndItemIdAndStatus(subject.userId(), itemId, LoanStatus.ACTIVE);
 		if (existing.isPresent()) {
-			return new BorrowResult(toBody(existing.get()), false);
+			return new BorrowResult(toBody(existing.get(), subject), false);
 		}
 
 		LeaseHandle held = null;
@@ -73,7 +73,7 @@ public class BorrowService implements LicenceCommand {
 		try {
 			LicenceView view = create(subject, itemId, decision.accessLevel(), decision.loanPeriodDays(),
 					held == null ? null : held.token());
-			return new BorrowResult(toBody(view, decision.accessLevel()), true);
+			return new BorrowResult(toBody(view, decision.accessLevel(), subject), true);
 		} catch (RuntimeException e) {
 			if (held != null) {
 				copyLease.release(held.token());   // never strand a slot
@@ -82,16 +82,18 @@ public class BorrowService implements LicenceCommand {
 		}
 	}
 
-	private BorrowResponse toBody(Loan loan) {
-		return new BorrowResponse(loan.getLoanId(), loan.getItemId(),
+	private BorrowResponse toBody(Loan loan, SubjectRef subject) {
+		return new BorrowResponse(loan.getLoanId(), subject.userId(), subject.institutionId(),
+				loan.getItemId(),
 				loan.getLicenceModel() == null ? null : loan.getLicenceModel().name(),
 				loan.getStatus().name(), loan.isCanPersist(), loan.getBorrowedAt(), loan.getDueAt(),
 				clock.instant());
 	}
 
-	private BorrowResponse toBody(LicenceView view, AccessLevel accessLevel) {
+	private BorrowResponse toBody(LicenceView view, AccessLevel accessLevel, SubjectRef subject) {
 		Instant now = clock.instant();
-		return new BorrowResponse(view.licenceId(), view.itemId(), modelName(accessLevel),
+		return new BorrowResponse(view.licenceId(), subject.userId(), subject.institutionId(),
+				view.itemId(), modelName(accessLevel),
 				LoanStatus.ACTIVE.name(), view.canPersist(), now, view.expiresAt(), now);
 	}
 

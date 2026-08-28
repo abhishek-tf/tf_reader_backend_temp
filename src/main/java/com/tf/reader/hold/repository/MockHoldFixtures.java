@@ -3,7 +3,7 @@ package com.tf.reader.hold.repository;
 /**
  * Seeded fixture reference for manually testing join-the-queue against a real, running app.
  *
- * <p>Same idea as {@code auth.repository.MockInstitutionRepository} and {@code MockUserRepository}
+ * <p>Same idea as {@code catalogue.api.InstitutionLookup} and {@code auth.repository.MockUserRepository}
  * — a documented seam onto data that already exists, not a bean of its own. Everything named here
  * comes from {@code DemoDataSeeder}, which runs automatically on every startup (idempotent — "X
  * already present" on a repeat run). Nothing here needs to be created by hand except one optional
@@ -58,10 +58,10 @@ package com.tf.reader.hold.repository;
  * <p><b>Getting a token.</b> {@code POST /api/v1/auth/dev-token?userId=...&institutionId=...}
  * issues a real, correctly-signed token — no hand-crafted JWTs needed.
  *
- * <p><b>Which database.</b> Despite {@code MONGODB_URI} naming {@code tnfreader}, this app
- * currently ends up reading/writing a database literally named {@code test} — a known,
- * unresolved Spring Boot / Docker Compose quirk, unrelated to hold's own code. Point any direct
- * {@code mongosh} inspection at {@code test}, not {@code tnfreader}, until that's tracked down.
+ * <p><b>Which database.</b> Whichever one {@code MONGODB_URI} actually names — confirmed by
+ * reading the running process's own environment, not assumed. The earlier note here about a
+ * mismatched {@code test} database was a leftover from the {@code compose.yaml} bug fixed in
+ * Week 2 and is no longer true; don't resurrect it without checking the process env again.
  */
 public final class MockHoldFixtures {
 

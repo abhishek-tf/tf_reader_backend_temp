@@ -259,28 +259,34 @@ paths:
 
         **This does not authenticate anybody and returns no session.** SAML is a browser
         redirect protocol: the assertion is delivered to our ACS by the identity provider,
-        not returned down this JSON call, so no endpoint can both start SAML and hand back a
+        not returned down this call, so no endpoint can both start SAML and hand back a
         token. The app opens `authorizationUrl`, the flow completes at
-        `POST /login/saml2/sso/tf-reader`, and the token is minted there.
+        `POST /login/saml2/sso/tf-reader`, and the token is minted there - as a one-time
+        code on a deep-link redirect, not a raw token, exchanged at `POST /auth/token`.
 
         What this call really does is **record which institution was chosen**, server-side,
         under an opaque `authTxnId` that travels through the redirect as RelayState. The
         institution therefore survives the round trip without being trusted from the client
         on the way back. `authTxnId` is not a credential and proves nothing on its own.
 
+        **`institutionId` and `idpHint` are query parameters, not a JSON body** - a deliberate
+        change for the RN integration, breaking the request shape below despite `FROZEN`.
         `idpHint` is accepted because the contract defines it, and is deliberately unused:
         we run one SAML integration for every institution, so nothing about the request
         selects an identity provider.
       x-stability: FROZEN
       x-called-by: [team1]
       security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/SamlStartRequest' }
-            example:
-              institutionId: inst_7f3
+      parameters:
+        - name: institutionId
+          in: query
+          required: true
+          schema: { type: string }
+          example: inst_7f3
+        - name: idpHint
+          in: query
+          required: false
+          schema: { type: string }
       responses:
         '200':
           description: The URL to open, and the transaction that carries the institution
@@ -341,7 +347,7 @@ paths:
     get:
       tags: [Auth]
       operationId: getCurrentSession
-      summary: Who am I, how long have I got, and here is a fresh token
+      summary: Who am I, and how long have I got
       description: |
         Called by the app on resume.
 
@@ -350,25 +356,22 @@ paths:
         which exists only because a token passed signature and claim validation before this
         method was reached. Every field below is copied from that token.
 
-        **This is also how a session slides.** An expired token is never exchangeable,
-        because an expired token never gets here: the filter chain refuses it with 401 and
-        this method does not run. A still-valid token is exchanged for a fresh one.
+        **This no longer mints anything.** A real refresh token exists now
+        (`POST /auth/refresh`, `POST /auth/token`), so this is a plain read of the token
+        already presented rather than the renewal mechanism - calling it twice in a row
+        returns the same `expiresAt` both times.
 
         `institutionId` is **omitted, not null**, for an individual subscriber. An
         individual belongs to no institution, which is emphatically not "every institution",
         and `"institutionId": null` reads to a consumer as "belongs to one whose id we lost".
 
-        `expiresAt` describes the token in `token`, not the one presented.
-
-        **`token` is an addition to the API Reference**, whose example omits it. Without it
-        `expiresAt` would describe something the client never receives and a session could
-        not slide at all. Flagged for the Contracts Gate.
+        `expiresAt` describes the token that was presented, not a new one.
       x-stability: FROZEN
       x-called-by: [team1]
       security: [{ appToken: [] }]
       responses:
         '200':
-          description: The current identity, and a freshly minted token
+          description: The current identity
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AuthMeResponse' }
@@ -383,7 +386,6 @@ paths:
                     collections: [col_medicine, col_nursing]
                     expiresAt: '2026-08-13T11:00:00Z'
                     serverTime: '2026-08-13T10:00:00Z'
-                    token: eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiJ1c2VyXzljMiJ9.sig
                 individual:
                   summary: An individual subscriber, with no institution at all
                   value:
@@ -393,7 +395,57 @@ paths:
                     collections: []
                     expiresAt: '2026-08-13T11:00:00Z'
                     serverTime: '2026-08-13T10:00:00Z'
-                    token: eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiJ1c2VyXzRhMSJ9.sig
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/token:
+    post:
+      tags: [Auth]
+      operationId: exchangeSignInCode
+      summary: Exchange a sign-in's one-time code for an access and refresh token
+      description: |
+        The code arrives via the SAML deep-link callback
+        (`tfreader://auth/callback?code=...`), minted once at the ACS alongside the tokens
+        it stands for. This call never mints anything new - it redeems what already exists,
+        once, and only once.
+      x-stability: DRAFT
+      x-called-by: [team1]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TokenExchangeRequest' }
+      responses:
+        '200':
+          description: The token pair the code was issued for
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshSession
+      summary: Rotate a refresh token for a fresh access and refresh token
+      description: |
+        Revokes the session the presented refresh token belongs to and replaces it with a
+        new one, mirroring the admin refresh mechanics. An unknown, already-rotated, revoked
+        or expired refresh token is refused rather than exchanged.
+      x-stability: DRAFT
+      x-called-by: [team1]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: A rotated token pair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   # ────────────────────────────────────────────────────────────────
@@ -1496,18 +1548,6 @@ components:
                 type: string
                 description: Post to this to begin. Follow it rather than building it.
 
-    SamlStartRequest:
-      type: object
-      required: [institutionId]
-      properties:
-        institutionId: { type: string, example: inst_7f3 }
-        idpHint:
-          type: string
-          description: >-
-            Accepted because the contract defines it, and unused. One SAML integration
-            serves every institution, so nothing about the request selects a provider.
-            Kept so the app does not change when a real federation arrives.
-
     SamlStartResponse:
       type: object
       description: >-
@@ -1550,9 +1590,10 @@ components:
     AuthMeResponse:
       type: object
       description: >-
-        Every identity field is copied from the validated token. The endpoint accepts no
-        body and no parameters, so there is nothing a caller could substitute.
-      required: [userId, type, roles, collections, expiresAt, serverTime, token]
+        Every field is copied from the presented token's own claims. The endpoint accepts
+        no body and no parameters, so there is nothing a caller could substitute, and mints
+        nothing - renewal is `POST /auth/refresh` now, not this endpoint.
+      required: [userId, type, roles, collections, expiresAt, serverTime]
       properties:
         userId: { type: string, example: user_9c2 }
         type: { $ref: '#/components/schemas/UserType' }
@@ -1571,13 +1612,32 @@ components:
         expiresAt:
           type: string
           format: date-time
-          description: The expiry of the token in `token`, not of the one presented.
+          description: The expiry of the token that was presented, not a new one.
         serverTime: { type: string, format: date-time }
-        token:
+
+    TokenExchangeRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
           type: string
-          description: >-
-            A fresh token. An addition to the API Reference — without it, `expiresAt`
-            describes something the client never receives.
+          description: The one-time code from the SAML deep-link callback.
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+
+    TokenResponse:
+      type: object
+      required: [accessToken, refreshToken, expiresIn]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresIn:
+          type: integer
+          description: Seconds until `accessToken` expires, not an absolute instant.
 
     # ── loans ───────────────────────────────────────────────────
 
