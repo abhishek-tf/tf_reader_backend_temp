@@ -37,7 +37,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 // Proves the four HOLD_* events don't just land in the changeLog collection - they actually
-// come back out of the real, published GET /api/v1/loans/changes endpoint (Haripriyaa's own
+// come back out of the real, published GET /api/v1/changes endpoint (Haripriyaa's own
 // module), through the real security chain, for the real reader who caused them. Everything
 // that writes an event runs through its real HTTP or service path; nothing here seeds a
 // ChangeLogEntry directly.
@@ -163,7 +163,7 @@ class ChangeFeedEndpointIT extends HoldContainerTest {
     }
 
     private List<String> reasonsFor(String userId) throws Exception {
-        String body = mockMvc.perform(get("/api/v1/loans/changes").header("Authorization", "Bearer " + token(userId)))
+        String body = mockMvc.perform(get("/api/v1/changes").header("Authorization", "Bearer " + token(userId)))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         return JsonPath.read(body, "$.changes[*].reason");

@@ -243,5 +243,17 @@ public class BorrowService implements LicenceCommand {
 	public boolean hasExpiredLoan(String userId, String itemId) {
 		return loanRepository.findByUserIdAndItemIdAndStatus(userId, itemId, LoanStatus.EXPIRED).isPresent();
 	}
+
+	@Override
+	public boolean hasActiveLoan(String userId, String itemId) {
+		return loanRepository.findByUserIdAndItemIdAndStatus(userId, itemId, LoanStatus.ACTIVE).isPresent();
+	}
+
+	@Override
+	public String activeLoanLeaseId(String userId, String itemId) {
+		return loanRepository.findByUserIdAndItemIdAndStatus(userId, itemId, LoanStatus.ACTIVE)
+				.map(Loan::getLeaseId)
+				.orElse(null);
+	}
 }
 

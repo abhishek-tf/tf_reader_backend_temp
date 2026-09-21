@@ -151,7 +151,7 @@ class LibraryEndpointsWebTest {
 		// instead. What this module owns is that nothing reads a library without an identity.
 		assertThat(mvc.perform(get("/api/v1/library")).andReturn().getResponse().getStatus())
 				.isNotEqualTo(200);
-		assertThat(mvc.perform(get("/api/v1/loans/changes")).andReturn().getResponse().getStatus())
+		assertThat(mvc.perform(get("/api/v1/changes")).andReturn().getResponse().getStatus())
 				.isNotEqualTo(200);
 
 		verify(assembler, never()).assemble(any());
@@ -173,7 +173,7 @@ class LibraryEndpointsWebTest {
 						false,
 						NOW));
 
-		mvc.perform(get("/api/v1/loans/changes").param("since", "1187")
+		mvc.perform(get("/api/v1/changes").param("since", "1187")
 						.with(authentication(readerToken())))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.changes[0].sequence").value(1188))
@@ -193,7 +193,7 @@ class LibraryEndpointsWebTest {
 		when(changeFeed.changesSince(eq("user_9c2"), any(ChangeCursor.class), anyInt()))
 				.thenReturn(new ChangesResponse(List.of(), "0", false, NOW));
 
-		mvc.perform(get("/api/v1/loans/changes").with(authentication(readerToken())))
+		mvc.perform(get("/api/v1/changes").with(authentication(readerToken())))
 				.andExpect(status().isOk());
 
 		verify(changeFeed).changesSince("user_9c2", ChangeCursor.BEGINNING,
@@ -203,12 +203,12 @@ class LibraryEndpointsWebTest {
 	@Test
 	@DisplayName("a cursor we could not have issued is a 400 in the shared envelope")
 	void rejectsAForeignCursor() throws Exception {
-		mvc.perform(get("/api/v1/loans/changes").param("since", "2026-08-20T10:00:00Z")
+		mvc.perform(get("/api/v1/changes").param("since", "2026-08-20T10:00:00Z")
 						.with(authentication(readerToken())))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
 				.andExpect(jsonPath("$.status").value(400))
-				.andExpect(jsonPath("$.path").value("/api/v1/loans/changes"))
+				.andExpect(jsonPath("$.path").value("/api/v1/changes"))
 				.andExpect(jsonPath("$.timestamp").exists());
 
 		verify(changeFeed, never()).changesSince(any(), any(), anyInt());
@@ -217,11 +217,11 @@ class LibraryEndpointsWebTest {
 	@Test
 	@DisplayName("an out-of-range size is a 400 rather than a quietly shortened page")
 	void rejectsAnOutOfRangeSize() throws Exception {
-		mvc.perform(get("/api/v1/loans/changes").param("size", "500")
+		mvc.perform(get("/api/v1/changes").param("size", "500")
 						.with(authentication(readerToken())))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
-		mvc.perform(get("/api/v1/loans/changes").param("size", "0")
+		mvc.perform(get("/api/v1/changes").param("size", "0")
 						.with(authentication(readerToken())))
 				.andExpect(status().isBadRequest());
 

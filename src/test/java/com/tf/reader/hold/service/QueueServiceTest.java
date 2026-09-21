@@ -78,6 +78,24 @@ class QueueServiceTest {
     }
 
     @Test
+    void joinRefusesAReaderWhoAlreadyHoldsThisTitle() {
+        CurrentUser me = new CurrentUser("user_a", UserType.INSTITUTION, "inst_1", List.of(), List.of());
+        when(entitlements.check(any(), any())).thenReturn(
+                new EntitlementDecision(true, AccessLevel.ENTITLED_CONCURRENT, "ent_1", 5, 14, null, null));
+        when(loans.hasActiveLoan("user_a", "item_1")).thenReturn(true);
+
+        // Without this, a reader whose own lease.claim() momentarily failed (every
+        // concurrent-reading slot taken) got queued behind a loan they already hold — the
+        // library screen then showed the same title as both granted and waiting at once.
+        assertThatThrownBy(() -> queue.join(me, "item_1"))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getCode())
+                .isEqualTo(ErrorCode.VALIDATION_FAILED);
+
+        verifyNoInteractions(holds);
+    }
+
+    @Test
     void joinPassesTheDenyReasonThroughUnchanged() {
         CurrentUser me = new CurrentUser("user_a", UserType.INSTITUTION, "inst_1", List.of(), List.of());
         when(entitlements.check(any(), any())).thenReturn(

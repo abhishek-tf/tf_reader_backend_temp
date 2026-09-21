@@ -81,6 +81,28 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 				ex);
 	}
 
+	/**
+	 * A Redis or MongoDB connection failure, or a Redis command timeout — {@code DataAccessException}
+	 * is the one common parent Spring Data gives both stores, so one handler covers a Redis outage
+	 * (the hold queue's own storage), a Mongo blip, and everything the {@code data} package throws
+	 * that isn't already claimed by a more specific handler above (DuplicateKeyException still wins
+	 * there — Spring dispatches to the closest match in the hierarchy, not declaration order).
+	 *
+	 * <p>Previously fell through to {@link #handleUnexpected}: a reader saw the exact same
+	 * INTERNAL_ERROR/"An unexpected error occurred" for a transient infrastructure blip as for a
+	 * genuine application bug, with nothing telling the client this one is worth retrying. Logged
+	 * at ERROR either way via {@link #logFailure} (503 is below the 500 threshold there, so this
+	 * adds an explicit warn here instead — a Redis blip is real and worth seeing in logs, just not
+	 * at the "something is broken" volume a 500 implies).
+	 */
+	@ExceptionHandler(org.springframework.dao.DataAccessException.class)
+	public ResponseEntity<ErrorResponse> handleDataAccessFailure(org.springframework.dao.DataAccessException ex,
+			HttpServletRequest request) {
+		log.warn("Data store failure, path={}", request.getRequestURI(), ex);
+		return respond(ErrorCode.SERVICE_UNAVAILABLE,
+				"This is taking longer than it should. Please try again in a moment.", request, ex);
+	}
+
 	// MaxUploadSizeExceededException (Spring's own request-size ceiling, belt-and-braces behind
 	// IngestService's own tier-aware 25MB/100MB checks) is NOT handled with an explicit
 	// @ExceptionHandler here: ResponseEntityExceptionHandler's base handleException(...) already

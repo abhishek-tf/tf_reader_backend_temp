@@ -11,6 +11,8 @@ import java.util.UUID;
 
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations.TypedTuple;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -61,7 +63,17 @@ public class CopyLeaseImpl implements CopyLease {
 
 	// Same slot, new token — never a release followed by a claim, which would open a
 	// window for a passing reader to take the copy a promoted waiter was just handed.
+	//
+	// Guarded on the old token still being present, same as EXTEND below: without this, a
+	// `fromToken` already reaped by CLAIM's own ZREMRANGEBYSCORE (or otherwise gone) made ZREM
+	// a no-op while ZADD still ran — silently adding a net-new slot, so the ZSET could hold more
+	// members than `copies` allows. `available()` then clamps to 0 forever while the phantom
+	// lease sits there with a fresh, far-future expiry: every reader queues for a title that
+	// actually has a free copy. See queue audit, 2026-09-20.
 	private static final DefaultRedisScript<Long> REASSIGN = new DefaultRedisScript<>("""
+			if redis.call('ZSCORE', KEYS[1], ARGV[1]) == false then
+			    return 0
+			end
 			redis.call('ZREM', KEYS[1], ARGV[1])
 			redis.call('DEL', KEYS[2])
 			redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3])
@@ -167,8 +179,17 @@ public class CopyLeaseImpl implements CopyLease {
 		String itemKey = LeaseKeys.itemKey(scope, itemId);
 		String oldTokenKey = LeaseKeys.tokenKey(fromToken);
 		String newTokenKey = LeaseKeys.tokenKey(newToken);
-		redis.execute(REASSIGN, List.of(itemKey, oldTokenKey, newTokenKey),
+		Long result = redis.execute(REASSIGN, List.of(itemKey, oldTokenKey, newTokenKey),
 				fromToken, String.valueOf(until.toEpochMilli()), newToken, itemKey);
+		if (result == null || result == 0) {
+			// The old token was already gone (reaped or otherwise) — the interface is void so
+			// the promoted reader still gets their offer, but the copy slot this call meant to
+			// carry forward was NOT created. Logged at WARN rather than silently returning,
+			// since discarding this used to let ZCARD silently exceed `copies` — see the
+			// REASSIGN script's own comment.
+			log.warn("copy-lease: reassign found no live lease for fromToken, no slot carried forward scope={} itemId={}",
+					scope, itemId);
+		}
 	}
 
 	/**
@@ -208,16 +229,18 @@ public class CopyLeaseImpl implements CopyLease {
 	 * row at all, which is exactly the case {@link #rebuild} must still visit to purge a
 	 * lease nothing backs any more.
 	 */
+	// SCAN, not KEYS: KEYS blocks Redis's single command thread for the whole keyspace walk, so
+	// everything else hitting Redis while it runs — claims, extends, availability reads — risks
+	// tripping the 200ms command timeout. This runs on a schedule, so that was a recurring burst
+	// of failures, not a one-off. See queue audit, 2026-09-20.
 	Set<LeaseKeys.Parsed> knownItems() {
-		Set<String> keys = redis.keys(LeaseKeys.ALL_KEYS_PATTERN);
-		if (keys == null) {
-			return Set.of();
-		}
 		Set<LeaseKeys.Parsed> items = new HashSet<>();
-		for (String key : keys) {
-			if (!key.startsWith(LeaseKeys.TOKEN_KEY_PREFIX)) {
-				items.add(LeaseKeys.parseItemKey(key));
-			}
+		try (Cursor<String> cursor = redis.scan(ScanOptions.scanOptions().match(LeaseKeys.ALL_KEYS_PATTERN).count(500).build())) {
+			cursor.forEachRemaining(key -> {
+				if (!key.startsWith(LeaseKeys.TOKEN_KEY_PREFIX)) {
+					items.add(LeaseKeys.parseItemKey(key));
+				}
+			});
 		}
 		return items;
 	}

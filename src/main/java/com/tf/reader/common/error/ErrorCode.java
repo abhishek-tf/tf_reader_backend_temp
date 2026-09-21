@@ -51,6 +51,10 @@ public enum ErrorCode {
 	// code. Raise with Haripriya (common/error owner) rather than treating as settled.
 	NO_COPIES_AVAILABLE(HttpStatus.CONFLICT),
 	INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR),
+	// A Redis/Mongo blip (connection refused, a command timeout) previously fell through to
+	// INTERNAL_ERROR — indistinguishable, client-side, from a genuine application bug. A reader
+	// gets one code that means "not us, try again shortly" instead. See queue audit, 2026-09-20.
+	SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE),
 
 	// Added by Haripriyaa (common/error owner), from the API Reference. Every status below is
 	// fixed by one of its response examples, apart from the one noted as inferred.

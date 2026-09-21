@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.Optional;
 import java.util.UUID;
 
 import lombok.extern.slf4j.Slf4j;
@@ -114,39 +115,90 @@ public class ReadBrokerService {
 			throw new ApiException(mapDenyReason(decision.reason()), "You do not have access to this title.");
 		}
 
-		// ── Step 3: Device cap check (ELITE only) ──
-		// Open access and subscription access are not copy/device limited. Only an Elite
-		// entitlement consumes a concurrent-reading device slot.
-		if (decision.accessLevel() == AccessLevel.ENTITLED_CONCURRENT && subject != null && subject.userId() != null) {
-			boolean admitted = devices.admit(subject.userId(), deviceKey);
-			log.info("read-broker: device cap itemId={} userId={} admitted={}", request.itemId(), userId, admitted);
-			if (!admitted) {
-				throw new ApiException(ErrorCode.DEVICE_LIMIT_REACHED, "This account is already reading on the maximum number of devices.");
-			}
-		}
-
-		// ── Step 4: Rights check ──
+		// ── Step 3: Rights check ──
 		rights.check(decision.accessLevel(), request.intent(), request.format());
 
-		// ── Step 5: Claim copy (ELITE / ENTITLED_CONCURRENT only) ──
+		// ── Step 4: Claim copy (ELITE / ENTITLED_CONCURRENT only) ──
 		boolean copyLimited = decision.accessLevel() == AccessLevel.ENTITLED_CONCURRENT;
 		LeaseHandle held = null;
 
 		if (copyLimited) {
 			String scope = subject != null ? subject.institutionId() : null;
-			var claimed = lease.claim(scope, request.itemId(), decision.copies());
+
+			// If this reader already holds an active loan for this title, try to EXTEND the
+			// lease that loan was originally granted with, rather than unconditionally claiming
+			// a brand-new one. This is THE fix for a severe double-count: without it, `create()`
+			// below is idempotent and correctly returns the SAME existing loan on every open —
+			// but by then this method had already claimed an entirely separate, second lease on
+			// every single call, including the very first open right after borrowing. One reader
+			// borrowing, then opening, a 2-copy title consumed BOTH copies by themselves, and
+			// their own next open found none free. See queue audit, 2026-09-20.
+			Optional<LeaseHandle> claimed = Optional.empty();
+			if (userId != null) {
+				String existingLeaseId = licences.activeLoanLeaseId(userId, request.itemId());
+				if (existingLeaseId != null) {
+					LeaseHandle existingHandle = new LeaseHandle(existingLeaseId, scope, request.itemId(), clock.instant());
+					if (lease.extend(existingHandle, clock.instant().plus(SESSION_TTL))) {
+						log.info("read-broker: reusing existing lease itemId={} userId={}", request.itemId(), userId);
+						claimed = Optional.of(existingHandle);
+					}
+					// Extend can fail honestly — the old lease already expired in Redis because
+					// nothing re-checked access in the last 30+ seconds. That slot is genuinely
+					// free again; falling through to a fresh claim() below reclaims it under a
+					// new token, exactly as it would for a first-time open.
+				}
+			}
 			if (claimed.isEmpty()) {
+				claimed = lease.claim(scope, request.itemId(), decision.copies());
+			}
+			if (claimed.isEmpty()) {
+				// A reader who already holds this title's loan has no business joining ITS OWN
+				// wait queue — QueueService.join() refuses that outright (VALIDATION_FAILED, so
+				// the same title is never shown as both granted and waiting at once — see queue
+				// audit, 2026-09-20). But that refusal is meant for the direct POST /api/v1/holds
+				// endpoint, where it is the honest, actionable answer. Reached from here instead,
+				// it is confusing: this reader is not asking to queue, they are asking to READ
+				// something they already have — the lease claim just failed because Redis's
+				// ephemeral concurrent-reading state (rebuilt from Mongo after every restart, or
+				// simply still catching up) hasn't caught up with reality yet. Checked and handled
+				// BEFORE calling queuedResponse() so this reader gets NO_COPIES_AVAILABLE (a code
+				// the client already has a real message for) instead of an unmapped
+				// VALIDATION_FAILED it can only show as a generic failure.
+				if (userId != null && licences.hasActiveLoan(userId, request.itemId())) {
+					log.info("read-broker: no copy free but reader already holds this loan itemId={} userId={}",
+							request.itemId(), userId);
+					throw new ApiException(ErrorCode.NO_COPIES_AVAILABLE,
+							"This title's reading slots are all busy right now — try again in a moment.");
+				}
 				log.info("read-broker: no copy free itemId={} userId={} institutionId={}, joining queue",
 						request.itemId(), userId, institutionId);
 				// No free copy — join the wait queue in this same call instead of making
 				// the client turn around and call POST /api/v1/holds itself. No licence,
 				// no content grant: the reader has nothing to read yet, only a place in line.
+				// Deliberately BEFORE the device cap check below: joining a wait list spends no
+				// device slot and no copy, so a reader already at their cap must still be able
+				// to queue for a title that is fully checked out. Checking the cap first (the
+				// original order) meant a capped reader got DEVICE_LIMIT_REACHED for a full
+				// title and could never join its queue at all — see queue audit, 2026-09-20.
 				return queuedResponse(subject, request.itemId());
 			}
 			held = claimed.get();
 			// Never the lease token itself in a log line — it is a bearer handle for this copy
 			// slot, the same category of thing as the tokens STYLE forbids logging.
 			log.info("read-broker: claimed copy itemId={} userId={}", request.itemId(), userId);
+		}
+
+		// ── Step 5: Device cap check (ELITE only) ──
+		// Open access and subscription access are not copy/device limited. Only an Elite
+		// entitlement consumes a concurrent-reading device slot, and only once a copy is
+		// actually in hand — see the note on Step 4 above for why this runs after the claim.
+		if (copyLimited && subject != null && subject.userId() != null) {
+			boolean admitted = devices.admit(subject.userId(), deviceKey);
+			log.info("read-broker: device cap itemId={} userId={} admitted={}", request.itemId(), userId, admitted);
+			if (!admitted) {
+				lease.release(held);
+				throw new ApiException(ErrorCode.DEVICE_LIMIT_REACHED, "This account is already reading on the maximum number of devices.");
+			}
 		}
 
 		try {

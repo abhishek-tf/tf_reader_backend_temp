@@ -75,7 +75,17 @@ public class PromotionService {
         Boolean gotLock = redis.opsForValue().setIfAbsent(lockKey, token, props.getPromoteLockTtl());
         if (gotLock == null || !gotLock) {
             log.info("promotion: already in progress scope={} itemId={}", scope, itemId);
-            return false; // somebody else is promoting this title right now
+            // fromToken is the copy THIS call was handed to carry forward — dropping it here
+            // silently, rather than releasing it like the "queue empty" branch below does,
+            // orphaned the copy for its full ~offerWindow+leaseSlack lifetime (~16 minutes) any
+            // time two offers on the same title lapsed in the same sweep tick. Releasing it
+            // makes the copy claimable again immediately — first-come-first-served rather than
+            // guaranteed to the next queued reader, but that is a small degradation next to a
+            // copy silently vanishing from the count. See queue audit, 2026-09-20.
+            if (fromToken != null) {
+                lease.release(fromToken);
+            }
+            return false;
         }
         try {
             boolean promoted = promoteUnderLock(scope, itemId, fromToken);
@@ -115,6 +125,11 @@ public class PromotionService {
             log.warn("promotion: Redis/Mongo disagree scope={} itemId={} userId={}, dropping stale queue row",
                     scope, itemId, nextUserId);
             redis.opsForZSet().remove(queueKey, member);
+            // Same reasoning as the lock-contention branch above: this call was still holding
+            // fromToken's copy and is about to return false without doing anything with it.
+            if (fromToken != null) {
+                lease.release(fromToken);
+            }
             return false;
         }
         Hold hold = maybeHold.get();
@@ -162,6 +177,12 @@ public class PromotionService {
         if (offered.isEmpty()) {
             log.info("promotion: lost race with a cancel holdId={} scope={} itemId={}", hold.getHoldId(), scope,
                     itemId);
+            // newToken already holds the copy in Redis (claimed+extended above, or reassigned
+            // from fromToken) but no Mongo Offer document ended up pointing at it — release it
+            // rather than leaking it for its full extended lifetime. Safe even in the reassign
+            // case: fromToken is already gone from the ZSET by this point, so releasing newToken
+            // is the only way this copy becomes claimable again.
+            lease.release(newToken);
             return false; // lost a race with a cancel — a later call reconciles
         }
 
