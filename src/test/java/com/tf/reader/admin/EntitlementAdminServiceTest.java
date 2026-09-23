@@ -525,6 +525,100 @@ class EntitlementAdminServiceTest {
 		assertThat(created.resolvedItemCount()).isZero();
 	}
 
+	// ---------------------------------------------------------------- Elite requires copies
+
+	@Test
+	@DisplayName("creating a grant for an Elite item with no copies is rejected — Elite is always copy-limited")
+	void createForAnEliteItemWithNoCopiesIsValidationFailed() {
+		when(institutionRepository.existsById("inst_7f3")).thenReturn(true);
+		when(catalogueItemStore.existsById("item_elite")).thenReturn(true);
+		when(catalogueItemStore.findById("item_elite")).thenReturn(Optional.of(eliteItem("item_elite")));
+
+		EntitlementCreate write = new EntitlementCreate(ScopeType.ITEM, "item_elite", null, null, null, null, null);
+
+		assertThatThrownBy(() -> service.create("inst_7f3", write)).isInstanceOf(ApiException.class)
+				.satisfies(e -> assertThat(((ApiException) e).getCode()).isEqualTo(ErrorCode.VALIDATION_FAILED));
+
+		verify(entitlementRepository, never()).save(any());
+		verify(versionBumper, never()).bump(any(), any());
+	}
+
+	@Test
+	@DisplayName("creating a grant for an Elite item WITH copies succeeds")
+	void createForAnEliteItemWithCopiesSucceeds() {
+		when(institutionRepository.existsById("inst_7f3")).thenReturn(true);
+		when(catalogueItemStore.existsById("item_elite")).thenReturn(true);
+		when(catalogueItemStore.findById("item_elite")).thenReturn(Optional.of(eliteItem("item_elite")));
+		when(entitlementRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+		EntitlementCreate write = new EntitlementCreate(ScopeType.ITEM, "item_elite", 3, null, null, null, null);
+
+		EntitlementView created = service.create("inst_7f3", write);
+
+		assertThat(created.copies()).isEqualTo(3);
+		assertThat(created.copyLimited()).isTrue();
+	}
+
+	@Test
+	@DisplayName("a publisher-scoped grant is rejected when ANY published item under that publisher is Elite")
+	void createForAPublisherWithAnEliteItemAndNoCopiesIsValidationFailed() {
+		when(institutionRepository.existsById("inst_7f3")).thenReturn(true);
+		when(publisherRepository.existsById("pub_rtlg")).thenReturn(true);
+		CatalogueItem open = new CatalogueItem();
+		open.setId("item_open");
+		open.setStatus(ItemStatus.PUBLISHED);
+		open.setAccessTier(com.tf.reader.catalogue.entity.AccessTier.OPEN_ACCESS);
+		when(catalogueItemStore.findByPublisherIdAndStatus("pub_rtlg", ItemStatus.PUBLISHED))
+				.thenReturn(List.of(open, eliteItem("item_elite")));
+
+		EntitlementCreate write = new EntitlementCreate(ScopeType.PUBLISHER, "pub_rtlg", null, null, null, null, null);
+
+		assertThatThrownBy(() -> service.create("inst_7f3", write)).isInstanceOf(ApiException.class)
+				.satisfies(e -> assertThat(((ApiException) e).getCode()).isEqualTo(ErrorCode.VALIDATION_FAILED));
+	}
+
+	@Test
+	@DisplayName("a draft (unpublished) Elite item does not block a copies-less grant — it grants no real access yet")
+	void createForAnUnpublishedEliteItemWithNoCopiesIsAllowed() {
+		when(institutionRepository.existsById("inst_7f3")).thenReturn(true);
+		when(catalogueItemStore.existsById("item_elite_draft")).thenReturn(true);
+		CatalogueItem draftElite = eliteItem("item_elite_draft");
+		draftElite.setStatus(ItemStatus.DRAFT);
+		when(catalogueItemStore.findById("item_elite_draft")).thenReturn(Optional.of(draftElite));
+		when(entitlementRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+		EntitlementCreate write = new EntitlementCreate(ScopeType.ITEM, "item_elite_draft", null, null, null, null,
+				null);
+
+		EntitlementView created = service.create("inst_7f3", write);
+
+		assertThat(created.copyLimited()).isFalse();
+	}
+
+	@Test
+	@DisplayName("clearing copies to null on an update is rejected when the grant's scope is an Elite item")
+	void updateClearingCopiesForAnEliteItemIsValidationFailed() {
+		Entitlement existing = entitlement("ent_5a1", "inst_7f3", ScopeType.ITEM, "item_elite", 3, 0);
+		when(entitlementRepository.findById("ent_5a1")).thenReturn(Optional.of(existing));
+		when(catalogueItemStore.findById("item_elite")).thenReturn(Optional.of(eliteItem("item_elite")));
+
+		EntitlementUpdate write = new EntitlementUpdate(null, 30, LocalDate.parse("2026-09-01"), null, 0L);
+
+		assertThatThrownBy(() -> service.update("ent_5a1", write)).isInstanceOf(ApiException.class)
+				.satisfies(e -> assertThat(((ApiException) e).getCode()).isEqualTo(ErrorCode.VALIDATION_FAILED));
+
+		verify(entitlementRepository, never()).save(any());
+	}
+
+	private static CatalogueItem eliteItem(String id) {
+		CatalogueItem item = new CatalogueItem();
+		item.setId(id);
+		item.setTitle("An Elite Book");
+		item.setStatus(ItemStatus.PUBLISHED);
+		item.setAccessTier(com.tf.reader.catalogue.entity.AccessTier.ELITE);
+		return item;
+	}
+
 	// ---------------------------------------------------------------- fixtures
 
 	private static Entitlement entitlement(String id, String institutionId, ScopeType scopeType, String scopeId,

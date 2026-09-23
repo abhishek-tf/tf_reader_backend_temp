@@ -3177,10 +3177,14 @@ components:
       properties:
         '@type':
           type: string
-          enum: ['http://schema.org/Book', 'http://schema.org/Audiobook']
+          enum: ['http://schema.org/Book', 'http://schema.org/Audiobook', 'http://schema.org/ScholarlyArticle']
           description: >-
-            Derived from `contentType`. AUDIO becomes `Audiobook`, PDF and EPUB become
-            `Book`.
+            Derived from `workType`, falling back to `contentType` for the two leaf types that
+            predate `workType` (every item without one is `BOOK`, per that field's own default).
+            An `ARTICLE` item is always `ScholarlyArticle`, regardless of its own `contentType`.
+            Otherwise AUDIO becomes `Audiobook`, PDF and EPUB become `Book`. `JOURNAL`/`VOLUME`/
+            `ISSUE` containers (no content of their own) also report `Book` here - nothing reads
+            this field for those three, only their `subsection` link.
           example: http://schema.org/Book
         identifier:
           type: string

@@ -129,7 +129,12 @@ public class QueueService implements QueueJoin, HoldQueueExit {
         changeLog.record(ChangeRecord.forHold(userId, ChangeReason.HOLD_PLACED, itemId, saved.getHoldId(), clock.instant()));
         log.info("hold: joined holdId={} itemId={} userId={} scope={} ticket={}", saved.getHoldId(), itemId, userId,
                 scope, ticket);
-        return new JoinResult(viewOf(saved, decision), true);
+        // Attempt immediate promotion — if a copy is free right now the joiner
+        // gets an offer without waiting for the next sweeper tick.
+        promotion.promoteNext(scope, itemId, null);
+        // Re-fetch so the response reflects OFFERED if promotion just succeeded.
+        Hold current = holds.findByHoldId(saved.getHoldId()).orElse(saved);
+        return new JoinResult(viewOf(current, decision), true);
     }
 
     public void leave(CurrentUser me, String holdId) {
