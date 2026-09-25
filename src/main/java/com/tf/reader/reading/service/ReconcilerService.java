@@ -60,7 +60,8 @@ public class ReconcilerService {
 
 	/** Single-item rebuild returning 1 if the item was touched, 0 if nothing was known for it. */
 	public int reconcileAndCount(String itemId) {
-		// Full scan until ActiveLoanQuery/LiveOfferQuery expose per-item reads (TODO 2026-W5).
+		// TODO(flambeau, 2026-W21): scope this to the one item once ActiveLoanQuery/LiveOfferQuery
+		// expose per-item reads. Full scan is still correct in the meantime, just unnecessary work.
 		return doReconcileAll();
 	}
 
