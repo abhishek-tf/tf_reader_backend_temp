@@ -1,6 +1,7 @@
 package com.tf.reader.loan.service;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,6 +26,7 @@ import com.tf.reader.loan.repository.LoanRepository;
 import com.tf.reader.reading.api.CopyLease;
 import com.tf.reader.reading.api.LeaseHandle;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Slf4j
@@ -36,17 +38,22 @@ public class BorrowService implements LicenceCommand {
 	private final CopyLease copyLease;
 	private final ChangeLog changeLog;
 	private final Clock clock;
+	// Null in production. Set loan.debug.loan-duration (e.g. PT5M) in application-local.yml
+	// to shorten every new loan for manual testing of expiry and queue promotion flows.
+	private final Duration debugLoanDuration;
 
 	// Five collaborators: the repo, the two other-team ports the borrow flow calls, the change-feed
 	// port (create() is the single loan-birth chokepoint, so LOAN_CREATED belongs here — D-029), and
 	// the clock. Above the 3-param guideline, but each is a distinct capability this job needs.
 	public BorrowService(LoanRepository loanRepository, EntitlementQuery entitlement,
-			CopyLease copyLease, ChangeLog changeLog, Clock clock) {
+			CopyLease copyLease, ChangeLog changeLog, Clock clock,
+			@Value("${loan.debug.loan-duration:#{null}}") Duration debugLoanDuration) {
 		this.loanRepository = loanRepository;
 		this.entitlement = entitlement;
 		this.copyLease = copyLease;
 		this.changeLog = changeLog;
 		this.clock = clock;
+		this.debugLoanDuration = debugLoanDuration;
 	}
 
 	/** What a borrow produced, and whether it was newly created (201) or already held (200). */
@@ -171,8 +178,9 @@ public class BorrowService implements LicenceCommand {
 		// dueAt = borrowedAt + loanPeriodDays for anything but OPEN_ACCESS (which never expires),
 		// per the Loan contract. loanPeriodDays <= 0 means the entitlement is unlimited, so the loan
 		// stays open-ended (null) — a Subscription can be either windowed or open-ended (D-030).
-		Instant dueAt = (accessLevel != AccessLevel.OPEN_ACCESS && loanPeriodDays > 0)
-				? now.plus(java.time.Duration.ofDays(loanPeriodDays))
+		// debugLoanDuration overrides the days when set (application-local.yml only, never production).
+		Instant dueAt = (accessLevel != AccessLevel.OPEN_ACCESS && (loanPeriodDays > 0 || debugLoanDuration != null))
+				? now.plus(debugLoanDuration != null ? debugLoanDuration : Duration.ofDays(loanPeriodDays))
 				: null;
 
 		Loan loan = Loan.builder()
@@ -229,6 +237,23 @@ public class BorrowService implements LicenceCommand {
 				loan.getDueAt(),
 				loan.getLeaseId()
 		);
+	}
+
+	@Override
+	public boolean hasExpiredLoan(String userId, String itemId) {
+		return loanRepository.findByUserIdAndItemIdAndStatus(userId, itemId, LoanStatus.EXPIRED).isPresent();
+	}
+
+	@Override
+	public boolean hasActiveLoan(String userId, String itemId) {
+		return loanRepository.findByUserIdAndItemIdAndStatus(userId, itemId, LoanStatus.ACTIVE).isPresent();
+	}
+
+	@Override
+	public String activeLoanLeaseId(String userId, String itemId) {
+		return loanRepository.findByUserIdAndItemIdAndStatus(userId, itemId, LoanStatus.ACTIVE)
+				.map(Loan::getLeaseId)
+				.orElse(null);
 	}
 }
 

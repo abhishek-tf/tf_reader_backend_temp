@@ -38,5 +38,12 @@ public record ReadingSessionRequest(
 		String devicePublicKey,
 
 		/** Ask for the encrypted search index too. Absent from the response if the book has none. */
-		boolean wantSearchIndex) {
+		boolean wantSearchIndex,
+
+		/**
+		 * 1-based chapter number. Null/absent defaults to 1, so a single-file book is
+		 * unaffected. Required when the client wants a specific chapter of a chaptered
+		 * BOOK or ARTICLE.
+		 */
+		Integer partNumber) {
 }

@@ -24,7 +24,13 @@ spring:
     redis:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT}
-      timeout: 200ms
+      # Was 200ms — too tight for the hold queue's multi-round-trip operations (join alone makes
+      # 4 sequential Redis calls) under any real contention: a Docker CPU spike, a JVM GC pause,
+      # or the periodic reconciler sweep, and a command timeout here surfaces to the reader as
+      # "the queue won't open". 2s is still well above a healthy same-host round trip but gives
+      # real headroom before a transient blip becomes a user-visible failure. See queue audit,
+      # 2026-09-20.
+      timeout: 2s
   security:
     saml2:
       relyingparty:
@@ -112,7 +118,10 @@ springdoc:
 management:
   health:
     redis:
-      enabled: false
+      # Was false — meant a degraded/unreachable Redis (the exact failure mode behind the hold
+      # queue's "won't open" symptom) never showed up as anything external, including this
+      # actuator health check. Re-enabled so it does. See queue audit, 2026-09-20.
+      enabled: true
 
 
 mock-oidc:

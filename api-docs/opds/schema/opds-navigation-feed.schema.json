@@ -106,7 +106,7 @@
       "type": "object",
       "required": ["title"],
       "properties": {
-        "@type": { "type": "string", "enum": ["http://schema.org/Book", "http://schema.org/Audiobook"] },
+        "@type": { "type": "string", "enum": ["http://schema.org/Book", "http://schema.org/Audiobook", "http://schema.org/ScholarlyArticle"] },
         "identifier": { "type": "string" },
         "title": { "type": "string" },
         "subtitle": { "type": "string" },

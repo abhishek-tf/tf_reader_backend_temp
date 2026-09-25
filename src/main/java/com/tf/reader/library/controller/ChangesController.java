@@ -15,19 +15,10 @@ import com.tf.reader.library.service.ChangeFeedService;
 import com.tf.reader.library.support.CurrentReaderResolver;
 import com.tf.reader.library.support.ReaderIdentity;
 
-/**
- * HTTP endpoints for the incremental change feed.
- *
- * <p><b>The path is wrong, and known to be wrong.</b> This feed carries hold promotions, offer
- * lapses and entitlement revocations as well as loan endings, so a hold event arrives on a
- * loan-shaped path. The API Reference proposes {@code GET /api/v1/changes} and keeps this one only
- * because wokay's file already wrote it down. {@link #PATH} is the single line that changes if it
- * moves.
- */
 @RestController
 public class ChangesController {
 
-	static final String PATH = "/api/v1/loans/changes";
+	static final String PATH = "/api/v1/changes";
 
 	private final ChangeFeedService changeFeed;
 	private final CurrentReaderResolver currentReader;

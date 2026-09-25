@@ -3,6 +3,8 @@ package com.tf.reader.hold.service;
 import com.tf.reader.hold.entity.Hold;
 import com.tf.reader.hold.entity.HoldStatus;
 import com.tf.reader.hold.repository.HoldRepository;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -41,12 +43,17 @@ public class QueueReconciler {
 
     @Scheduled(fixedDelayString = "${holds.reconcile-interval:5m}")
     public void reconcile() {
+        reconcileAndCount();
+    }
+
+    /** Same rebuild, returning the number of (scope, itemId) queues touched. */
+    public int reconcileAndCount() {
         Set<QueueKeys.Parsed> items = new HashSet<>();
         holds.findByStatus(HoldStatus.QUEUED)
                 .forEach(h -> items.add(new QueueKeys.Parsed(h.getScope(), h.getItemId())));
         items.addAll(knownQueueItems());
-
         items.forEach(item -> reconcileOne(item.scope(), item.itemId()));
+        return items.size();
     }
 
     private void reconcileOne(String scope, String itemId) {
@@ -79,11 +86,15 @@ public class QueueReconciler {
         }
     }
 
+    // SCAN, not KEYS: KEYS walks the whole keyspace in one blocking call on Redis's single
+    // command thread, so every join/accept/availability read queued behind it risks tripping
+    // the 200ms command timeout — and this runs on a schedule, so that was a recurring burst of
+    // failures, not a one-off. SCAN walks the same keyspace in small steps, interleaved with
+    // other commands. See queue audit, 2026-09-20.
     private Set<QueueKeys.Parsed> knownQueueItems() {
-        Set<String> keys = redis.keys(QueueKeys.ALL_QUEUE_KEYS_PATTERN);
         Set<QueueKeys.Parsed> parsed = new HashSet<>();
-        if (keys != null) {
-            keys.forEach(key -> parsed.add(QueueKeys.parseQueueKey(key)));
+        try (Cursor<String> cursor = redis.scan(ScanOptions.scanOptions().match(QueueKeys.ALL_QUEUE_KEYS_PATTERN).count(500).build())) {
+            cursor.forEachRemaining(key -> parsed.add(QueueKeys.parseQueueKey(key)));
         }
         return parsed;
     }

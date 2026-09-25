@@ -13,6 +13,7 @@ import com.tf.reader.catalogue.entity.CatalogueItem;
 import com.tf.reader.catalogue.entity.CatalogueItem.Asset;
 import com.tf.reader.catalogue.entity.ContentType;
 import com.tf.reader.catalogue.entity.Publisher;
+import com.tf.reader.catalogue.entity.WorkType;
 import com.tf.reader.catalogue.opds.dto.Copies;
 import com.tf.reader.catalogue.opds.dto.EncryptedInfo;
 import com.tf.reader.catalogue.opds.dto.OpdsAvailability;
@@ -40,6 +41,9 @@ class OpdsPublicationMapper {
 
     private static final String BOOK_TYPE = "http://schema.org/Book";
     private static final String AUDIOBOOK_TYPE = "http://schema.org/Audiobook";
+    // team1's Q-1b: this is the value they now map to their own 'article' WorkType, agreed with
+    // them directly rather than left as a guess on either side.
+    private static final String ARTICLE_TYPE = "http://schema.org/ScholarlyArticle";
 
     // The acquisition href returns flambeau JSON, never the book itself - the real media
     // type lives in properties.indirectAcquisition[0].type instead (wokay-api.yaml).
@@ -107,7 +111,7 @@ class OpdsPublicationMapper {
         boolean audio = item.getContentType() == ContentType.AUDIO;
         Publisher publisher = publishersById.get(item.getPublisherId());
         return new OpdsPublicationMetadata(
-                audio ? AUDIOBOOK_TYPE : BOOK_TYPE,
+                schemaTypeFor(item, audio),
                 identifierFor(item),
                 item.getTitle(),
                 item.getSubtitle(),
@@ -122,6 +126,19 @@ class OpdsPublicationMapper {
                 audio ? null : item.getNumberOfPages(),
                 audio ? item.getDuration() : null,
                 contributors(item.getSubjects()));
+    }
+
+    // ARTICLE is the only WorkType this needs to special-case: BOOK, a null workType (every item
+    // that predates the field, per CatalogueItem's own comment) and the JOURNAL/VOLUME/ISSUE
+    // containers all keep the existing audio-or-book heuristic, since nothing downstream reads
+    // metadata().type for a container - the frontend's journal-cover path never parses it (it
+    // reads the subsection link instead), so there is nothing to gain from guessing a Periodical/
+    // PublicationVolume/PublicationIssue type nobody consumes yet.
+    private String schemaTypeFor(CatalogueItem item, boolean audio) {
+        if (item.getWorkType() == WorkType.ARTICLE) {
+            return ARTICLE_TYPE;
+        }
+        return audio ? AUDIOBOOK_TYPE : BOOK_TYPE;
     }
 
     private String identifierFor(CatalogueItem item) {

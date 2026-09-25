@@ -12,10 +12,10 @@ download, see it on a shelf.
 
 | Module | Owner | Holds |
 |---|---|---|
-| `auth/` | Hemanth | SAML + OIDC sign-in, JWT issue/validate, `/auth/me`, `/dev-token` |
+| `auth/` | Hemanth | SAML + OIDC sign-in, JWT issue/validate, session lifecycle, `/auth/me`, `/dev-token` |
 | `loan/` | Shashank Kumar Lal | Borrow, return, list, the expiry sweeper |
-| `hold/` | Khushi Gupta | Join queue, offers, promotion, the offer sweeper, availability |
-| `reading/` | Sai Deepak Varanasi | The read/download broker, the Redis copy lease, device cap, the reconciler |
+| `hold/` | Khushi Gupta | Join queue, offers, promotion, the offer sweeper, availability, queue reconciler |
+| `reading/` | Sai Deepak Varanasi | The read/download broker, the Redis copy lease, device cap, the lease reconciler, `/ops/reconcile` |
 | `library/` | Haripriya | The personal shelf, the change feed, the outbox |
 
 Anything under `catalogue/ admin/ content/ crypto/ ingest/` is **wokay's**. Do not edit those files.
@@ -25,12 +25,11 @@ below for the two seams you're actually allowed to call into.
 ## The collections we own
 
 ```
-devices  loans  holds  changeLog  changeSeq  changeLogOutbox
+readerSessions  devices  loans  holds  changeLog  changeSeq  changeLogOutbox
 ```
 
-Ids are prefixed strings, matching wokay's convention: `lease_ hold_ loan_ sess_ authTxn_`. `devices`
-is one document per reader (an array of observed fingerprints, not one document per device) — see
-"things that bite" below for why.
+Ids are prefixed strings, matching wokay's convention: `rsess_ lease_ hold_ loan_ sess_ authTxn_ offer_`.
+`devices` is one document per reader (an array of observed fingerprints, not one document per device).
 
 ## The two seams into wokay, published as code
 
@@ -41,9 +40,10 @@ prevent — nothing stops it at compile time, so it's a review-time check.
 ```java
 // com.tf.reader.catalogue.api
 EntitlementDecision check(SubjectRef subject, String itemId);
+Map<String, EntitlementDecision> checkAll(SubjectRef subject, List<String> itemIds);
 
 // com.tf.reader.content.api
-ContentGrant grant(ContentGrantRequest request);
+ContentGrant grant(ContentGrantRequest request);  // partNumber field added for chapter-level access
 ```
 
 `EntitlementQuery` is called from `loan` (borrow), `reading` (every read/download), and `hold` (join,
@@ -60,25 +60,25 @@ called from `reading` only, at the last step of the broker, after a licence alre
    `queue:{scope}:{itemId}`, never from a stored field on the `Hold` document — there deliberately
    is no `position` column. If Redis and Mongo disagree, `GET /api/v1/holds` throws a loud `500`
    rather than guessing; that's intentional, not a bug to paper over.
-3. **`reading`'s reconciler rebuilds Redis lease state from Mongo on every app startup** — active
-   ELITE loans (`loan.api.ActiveLoanQuery.findAllActiveElite()`) plus live hold offers
-   (`hold.api.LiveOfferQuery.findAllLiveOffers()`). It does not wipe-and-replace: an in-flight
-   `claim()` with no DB row yet (mid-request, not yet committed) is deliberately left alone inside
-   the claim's TTL window, or a concurrent reconcile could evict a slot that's about to be
-   legitimately spent. **`hold` has no equivalent reconciler yet** for its own queue-side Redis
-   drift — a `holds.reconcile-interval` config property exists with nothing implementing it.
-4. **Token audiences.** App tokens (`aud=tf-app`) and admin tokens (`aud=tf-admin`) are structurally
-   different — see wokay's admin session/claim work before assuming a token shape.
-5. **No refresh token exists today.** `GET /api/v1/auth/me` re-issues a fresh 1-hour JWT on every
-   call; that's the entire "refresh" mechanism. A proposed design (`ReaderSession`, `/auth/refresh`,
-   `/auth/logout`, a one-time-code exchange) exists as a doc but **nothing in it is built** — don't
-   assume it's live.
+3. **Both reconcilers run at startup and on a schedule.**
+   - `ReconcilerService` (`reading`) rebuilds Redis lease ZSET from active ELITE loans and live
+     hold offers on every app start (via `@EventListener(ApplicationReadyEvent.class)`) and is
+     also callable on-demand from `POST /api/v1/ops/reconcile`.
+   - `QueueReconciler` (`hold`) reconciles Redis queue ZSETs from Mongo holds every
+     `holds.reconcile-interval` (default 5 minutes). It reads Redis before Mongo to avoid evicting
+     a hold that is mid-join.
+4. **Token audiences.** App tokens (`aud=tf-app`, 1-hour TTL) and admin tokens (`aud=tf-admin`) are
+   structurally different. `/api/v1/ops/**` accepts admin tokens (same chain as `/api/admin/**`).
+5. **Session lifecycle is real — refresh tokens exist.** `ReaderSession` entities are stored in Mongo.
+   Refresh tokens are 256-bit random values stored as SHA-256 fingerprints (never the raw token).
+   `/auth/refresh` rotates the refresh token; `/auth/logout` revokes it. GET `/auth/me` re-issues an
+   access token from the verified refresh token, not from the access token itself.
 6. **`/auth/dev-token` is a full auth bypass if reachable outside dev/test** — mints a signed JWT
-   for any `userId`/`institutionId`, no checks at all. Same risk category as the mock SAML/OIDC
-   provider controllers (`saml-mock.enabled` / `mock-oidc.enabled`, both off by default).
-7. **Real sign-in currently resolves against a hardcoded 4-user list** (`MockUserRepository`), not a
-   real Mongo-backed directory. `ReaderUserRepository`/`ReaderUser` — the real thing — are empty
-   stub files. A real institutional user cannot sign in today.
+   for any `userId`/`institutionId`, no checks at all. `tnf.dev-auth.enabled` must be explicitly
+   `true`; it is off in all deployed profiles.
+7. **Real sign-in uses `ReaderUserDirectory` backed by Mongo.** Institutional users are resolved from
+   the `readerUsers` collection and provisioned automatically on first sign-in. `MockUserRepository`
+   is gone. Individual (B2C) users are provisioned on first OIDC login via `findOrProvisionIndividual`.
 8. **The weekly fork sync.** Same caveat as wokay: this repo is a fork, and context files reach it on
    the weekly sync, not immediately.
 
@@ -86,14 +86,12 @@ called from `reading` only, at the last step of the broker, after a licence alre
 
 | Group | Count | Token |
 |---|---|---|
-| `auth` (sign-in, `/me`, `/dev-token`) | 6 | none for sign-in start/callback, app token for `/me` |
-| `loan` (`/api/v1/loans**`) | 3 | app token |
-| `hold` (`/api/v1/holds**`, availability) | 5 | app token |
+| `auth` (sign-in, refresh, logout, `/me`, `/dev-token`) | 8 | none for sign-in/token/refresh/logout, app token for `/me` |
+| `loan` (`/api/v1/loans/**`) | 3 | app token |
+| `hold` (`/api/v1/holds/**`, availability) | 5 | app token |
 | `reading` (`/api/v1/reading-sessions`) | 1 | app token |
-| `library` (shelf, change feed) | 2 | app token |
-
-Full request/response shapes are in `documents/api-endpoints-till-week-3.md`. A readiness/gap
-assessment per endpoint is in `documents/flambeau-week3-progress-report.md`.
+| `library` (shelf, change feed at `/api/v1/changes`) | 2 | app token |
+| `ops` (`/api/v1/ops/reconcile`) | 1 | **admin token** (`tf-admin`) |
 
 ## Branch naming
 
@@ -102,21 +100,9 @@ assessment per endpoint is in `documents/flambeau-week3-progress-report.md`.
 
 ## Current known gaps
 
-Worth knowing so you don't rediscover them:
-
 - `loan.api.LoanRights` — empty placeholder class, no implementation, no consumers.
-- `hold.api.HoldPromotion.promote(itemId)` carries no scope parameter, so a promotion triggered by a
-  loan return always does a fresh Redis claim rather than the safer atomic reassignment same-module
-  cancel/lapse paths get. Needs a signature change, agreed jointly between `loan` and `hold`.
-- `hold`'s own Redis/Mongo drift has no reconciler (see "things that bite" #3).
-- `AvailabilitySnapshot.myPosition` is declared, never populated.
-- `library`'s change-feed path (`GET /api/v1/loans/changes`) is acknowledged-wrong in its own code
-  comment — should probably be `/api/v1/changes`. Deferred, not yet fixed.
-- Whether `reading` ever emits `ENTITLEMENT_REVOKED` into the change feed is still an open question
-  (matters for downloaded/offline titles that never call back into the broker on revocation).
-- ~~`auth.api.SessionQuery`/`SessionView` are explicitly marked **PROPOSED**, not frozen — `library`
-  already depends on them existing eventually but currently reaches into `auth.model` directly as a
-  documented workaround.~~ Closed: `SessionQueryImpl` exists and `library.support.CurrentReaderResolver`
-  now delegates to it instead of importing `auth.model`.
+- Per-item targeted queries in `ActiveLoanQuery` and `LiveOfferQuery` are not yet exposed
+  (`findActiveEliteByItem` / `findByItem`), so `ReconcilerService.reconcile(itemId)` currently
+  does a full scan instead of a scoped one. Tracked as TODO(2026-W5) in the service comment.
 
-Read `.claude/context/shared.md` and `docs/FORK-SYNC.md` as well.
+Read `.claude/context/shared.md` as well.

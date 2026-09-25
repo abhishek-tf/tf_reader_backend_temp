@@ -40,6 +40,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -91,7 +92,7 @@ class ReadBrokerServiceTest {
 	}
 
 	private ReadingSessionRequest request(Intent intent) {
-		return new ReadingSessionRequest(ITEM, Format.PDF, intent, KEY, false);
+		return new ReadingSessionRequest(ITEM, Format.PDF, intent, KEY, false, null);
 	}
 
 	private EntitlementDecision entitled(AccessLevel level, Integer copies, int loanPeriodDays) {
@@ -111,7 +112,7 @@ class ReadBrokerServiceTest {
 
 	@Test
 	void anUndecodableDeviceKeyIsRejectedBeforeAnythingElseRuns() {
-		ReadingSessionRequest bad = new ReadingSessionRequest(ITEM, Format.PDF, Intent.STREAM, "!!! not base64 !!!", false);
+		ReadingSessionRequest bad = new ReadingSessionRequest(ITEM, Format.PDF, Intent.STREAM, "!!! not base64 !!!", false, null);
 
 		assertThatThrownBy(() -> broker.open(MEMBER, bad))
 				.isInstanceOf(ApiException.class)
@@ -225,18 +226,51 @@ class ReadBrokerServiceTest {
 		verify(changeLog, never()).record(any());
 	}
 
-	// ── step 3 ──────────────────────────────────────────────────────────────
+	// ── step 5 (device cap now runs AFTER the copy claim — see ReadBrokerService, 2026-09-20:
+	// checking it first meant a capped reader on a fully booked title got refused before ever
+	// reaching the queue-join branch, and could never queue at all) ──────────────────────────
 
 	@Test
-	void eliteDeviceCapRefusalStopsBeforeTheGrantIsEverFetched() {
+	void eliteDeviceCapRefusalStopsBeforeTheGrantIsEverFetchedAndReleasesTheClaimedCopy() {
 		when(entitlements.check(MEMBER, ITEM)).thenReturn(entitled(AccessLevel.ENTITLED_CONCURRENT, 5, 14));
+		// No existing lease to reuse (see the reuse-before-claim fix, 2026-09-20) — falls straight
+		// through to a fresh claim, exactly as this test already expected.
+		when(licences.activeLoanLeaseId(MEMBER.userId(), ITEM)).thenReturn(null);
+		LeaseHandle handle = new LeaseHandle("token_1", MEMBER.institutionId(), ITEM, CLOCK.instant().plusSeconds(30));
+		when(lease.claim(MEMBER.institutionId(), ITEM, 5)).thenReturn(Optional.of(handle));
 		when(devices.admit(eq(MEMBER.userId()), any())).thenReturn(false);
 
 		assertThatThrownBy(() -> broker.open(MEMBER, request(Intent.STREAM)))
 				.extracting(e -> ((ApiException) e).code())
 				.isEqualTo(ErrorCode.DEVICE_LIMIT_REACHED);
 
-		verifyNoInteractions(content, licences, lease, queue);
+		// A copy WAS claimed (there was one free) before the cap refused the reader — it must
+		// be released, not left held by a session that never opened. See release() call below.
+		verify(lease).release(handle);
+		verifyNoInteractions(content, queue);
+		verify(licences, never()).create(any(), any(), any(), anyInt(), any());
+	}
+
+	@Test
+	void eliteDeviceCapRefusalOnAFullyBookedTitleJoinsTheQueueInstead() {
+		when(entitlements.check(MEMBER, ITEM)).thenReturn(entitled(AccessLevel.ENTITLED_CONCURRENT, 5, 14));
+		when(lease.claim(MEMBER.institutionId(), ITEM, 5)).thenReturn(Optional.empty());
+		// Checked before queuing (see the loan-already-held guard added 2026-09-20) and false
+		// here — this reader has never had this title, so the guard is a no-op and this stays
+		// the queuing path the test name describes.
+		when(licences.hasActiveLoan(MEMBER.userId(), ITEM)).thenReturn(false);
+		HoldView hold = new HoldView("hold_1", ITEM, "QUEUED", 3, 4, 14, CLOCK.instant(), null);
+		when(queue.join(MEMBER.userId(), MEMBER.institutionId(), ITEM))
+				.thenReturn(new QueueJoin.JoinResult(hold, true));
+
+		ReadingSessionResponse response = broker.open(MEMBER, request(Intent.STREAM));
+
+		// No copy was free, so the reader joins the queue — the device cap is never even
+		// consulted, because joining a wait list spends no device slot.
+		assertThat(response.licenceModel()).isEqualTo("ELITE");
+		assertThat(response.holdCreatedAt()).isEqualTo(CLOCK.instant());
+		verifyNoInteractions(devices, content);
+		verify(licences, never()).create(any(), any(), any(), anyInt(), any());
 	}
 
 	@Test
@@ -286,6 +320,7 @@ class ReadBrokerServiceTest {
 	void aFullEliteTitleJoinsTheQueueInsteadOfRefusingAndCreatesNoLicenceOrGrant() {
 		when(entitlements.check(MEMBER, ITEM)).thenReturn(entitled(AccessLevel.ENTITLED_CONCURRENT, 5, 14));
 		when(lease.claim(MEMBER.institutionId(), ITEM, 5)).thenReturn(Optional.empty());
+		when(licences.hasActiveLoan(MEMBER.userId(), ITEM)).thenReturn(false);
 		HoldView hold = new HoldView("hold_1", ITEM, "QUEUED", 3, 4, 14, CLOCK.instant(), null);
 		when(queue.join(MEMBER.userId(), MEMBER.institutionId(), ITEM))
 				.thenReturn(new QueueJoin.JoinResult(hold, true));
@@ -298,7 +333,52 @@ class ReadBrokerServiceTest {
 		assertThat(response.licenceModel()).isEqualTo("ELITE");
 		assertThat(response.holdCreatedAt()).isEqualTo(CLOCK.instant());
 
-		verifyNoInteractions(licences, content);
+		verifyNoInteractions(content);
+		verify(licences, never()).create(any(), any(), any(), anyInt(), any());
+	}
+
+	@Test
+	void aReaderWhoAlreadyHoldsThisTitleGetsAClearAnswerInsteadOfBeingRefusedFromItsOwnQueue() {
+		when(entitlements.check(MEMBER, ITEM)).thenReturn(entitled(AccessLevel.ENTITLED_CONCURRENT, 5, 14));
+		when(lease.claim(MEMBER.institutionId(), ITEM, 5)).thenReturn(Optional.empty());
+		when(licences.hasActiveLoan(MEMBER.userId(), ITEM)).thenReturn(true);
+
+		// Without this check, falling through to queue.join() here hit that method's OWN
+		// already-holds-this-loan guard (added the same day, for the direct POST /api/v1/holds
+		// endpoint) and surfaced as an unmapped VALIDATION_FAILED the client could only show as
+		// a generic failure — even though this reader was not asking to queue at all, only to
+		// read something they already have. NO_COPIES_AVAILABLE is a code the client already
+		// renders a real message for.
+		assertThatThrownBy(() -> broker.open(MEMBER, request(Intent.STREAM)))
+				.extracting(e -> ((ApiException) e).code())
+				.isEqualTo(ErrorCode.NO_COPIES_AVAILABLE);
+
+		verifyNoInteractions(queue, content);
+		verify(licences, never()).create(any(), any(), any(), anyInt(), any());
+	}
+
+	@Test
+	void reopeningATitleWithAnActiveLoanExtendsItsExistingLeaseRatherThanClaimingASecondOne() {
+		when(entitlements.check(MEMBER, ITEM)).thenReturn(entitled(AccessLevel.ENTITLED_CONCURRENT, 2, 14));
+		when(licences.activeLoanLeaseId(MEMBER.userId(), ITEM)).thenReturn("lease_existing");
+		when(lease.extend(any(), any())).thenReturn(true);
+		when(licences.create(any(), any(), any(), anyInt(), any())).thenReturn(
+				new LicenceView("loan_1", MEMBER.userId(), ITEM, AccessLevel.ENTITLED_CONCURRENT, false, null, "lease_existing"));
+		when(content.grant(any())).thenReturn(aGrant());
+
+		// THE bug this pins: before this reuse-before-claim fix, this method called
+		// `lease.claim()` unconditionally, so a reader who already had an active loan (with its
+		// own lease from borrowing) got a SECOND, entirely separate lease on every single open —
+		// one reader on a 2-copy title consumed both copies alone. Reusing the existing lease via
+		// extend() means `lease.claim()` must never even be called on this path.
+		ReadingSessionResponse response = broker.open(MEMBER, request(Intent.STREAM));
+
+		assertThat(response.content()).isNotNull();
+		verify(lease, never()).claim(any(), any(), anyInt());
+		// atLeastOnce, not exactly once: Step 8 extends the SAME handle again to the full session
+		// TTL after the content grant succeeds — this is about the lease being reused at all, not
+		// how many times the existing code path happens to extend it.
+		verify(lease, atLeastOnce()).extend(eq(new LeaseHandle("lease_existing", MEMBER.institutionId(), ITEM, CLOCK.instant())), any());
 	}
 
 	@Test

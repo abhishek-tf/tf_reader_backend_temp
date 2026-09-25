@@ -66,6 +66,18 @@ public class SecurityConfig {
 
 	static final String PUBLIC_OPDS_PATHS = "/opds/v1/public/**";
 
+	/**
+	 * Reading/downloading itself has to work for a signed-out reader too, because
+	 * {@code AccessTier.OPEN_ACCESS} content needs no institution and no sign-in at all (see
+	 * {@code shared.md}'s "Three kinds of book, one set of words"). This does NOT weaken the
+	 * endpoint to "anyone gets any book" — {@code EntitlementQueryImpl} still runs on every call and
+	 * still denies a signed-out (or wrongly-entitled) caller for anything that is not open access.
+	 * A present {@code Authorization} header is still validated normally by this same chain's
+	 * resource server below; this only stops an ABSENT one from being rejected before the
+	 * controller ever gets a chance to ask what tier the book actually is.
+	 */
+	static final String READING_SESSIONS_PATH = "/api/v1/reading-sessions";
+
 	private final ProblemAuthenticationEntryPoint authenticationEntryPoint;
 	private final ProblemAccessDeniedHandler accessDeniedHandler;
 
@@ -186,13 +198,13 @@ public class SecurityConfig {
 		return stateless(http).build();
 	}
 
-	/** Admin API. Requires a valid, session-backed {@code tf-admin} access token. */
+	/** Admin API and ops. Requires a valid, session-backed {@code tf-admin} access token. */
 	@Bean
 	@Order(4)
 	SecurityFilterChain adminApiFilterChain(HttpSecurity http,
 			@Qualifier(JwtConfig.ADMIN_ACCESS_TOKEN_DECODER) JwtDecoder adminAccessTokenDecoder) throws Exception {
 
-		http.securityMatcher("/api/admin/**")
+		http.securityMatcher("/api/admin/**", "/api/v1/ops/**")
 				.authorizeHttpRequests(authorize -> authorize
 						.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
 						.anyRequest().authenticated())
@@ -211,6 +223,9 @@ public class SecurityConfig {
 	 * <p>Most of these are not written yet. The chain still binds the surface to its own audience now,
 	 * so an admin or refresh token presented here is rejected during decoding, before routing, and an
 	 * endpoint another team adds later inherits that without anyone having to remember.
+	 *
+	 * <p>One path inside this chain, {@code POST} {@link #READING_SESSIONS_PATH}, is carved out to
+	 * {@code permitAll()} rather than {@code authenticated()} — see that constant's own doc.
 	 */
 	@Bean
 	@Order(5)
@@ -221,6 +236,10 @@ public class SecurityConfig {
 		http.securityMatcher(APP_API_PATHS, APP_OPDS_PATHS)
 				.authorizeHttpRequests(authorize -> authorize
 						.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+						// See READING_SESSIONS_PATH's own doc: an absent token must reach the
+						// controller so OPEN_ACCESS can be served, but a PRESENT one is still
+						// validated by the same resource server below like any other request here.
+						.requestMatchers(HttpMethod.POST, READING_SESSIONS_PATH).permitAll()
 						.anyRequest().authenticated())
 				.oauth2ResourceServer(oauth2 -> oauth2
 						.authenticationEntryPoint(this.authenticationEntryPoint)

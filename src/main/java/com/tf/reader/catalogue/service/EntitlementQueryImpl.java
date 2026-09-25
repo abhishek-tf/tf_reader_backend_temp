@@ -47,19 +47,19 @@ class EntitlementQueryImpl implements EntitlementQuery {
             throw new IllegalArgumentException("itemId is required");
         }
 
-        // A suspended institution must read exactly like an unknown one, same reason
-        // InstitutionLookup itself collapses the two - so this is NOT_FOUND, not a distinct
-        // reason that would disclose the institution's existence or status.
-        if (institutionLookup.find(subject.institutionId()).isEmpty()) {
-            return denied(DenyReason.NOT_FOUND);
-        }
+        // Institution lookup moved OUT of this method and into decide() itself, positioned after
+        // the OPEN_ACCESS bypass - see that check's own comment. A signed-out reader has no
+        // institutionId at all, and open access needs no institution, so gating every call on one
+        // up front wrongly denied an anonymous reader NOT_FOUND before an open-access item's own
+        // tier was ever looked at.
+        boolean hasInstitution = knownInstitution(subject.institutionId());
 
         CatalogueItem item = catalogueItemStore.findById(itemId).orElse(null);
         Map<String, Publisher> publishersById = item == null ? Map.of()
                 : publisherRepository.findById(item.getPublisherId())
                         .map(publisher -> Map.of(publisher.getId(), publisher)).orElse(Map.of());
 
-        return decide(subject, item, publishersById);
+        return decide(subject, item, publishersById, hasInstitution);
     }
 
     @Override
@@ -68,17 +68,10 @@ class EntitlementQueryImpl implements EntitlementQuery {
             return Map.of();
         }
 
-        // A suspended institution must read exactly like an unknown one, same reason
-        // InstitutionLookup itself collapses the two - so this is NOT_FOUND, not a distinct
-        // reason that would disclose the institution's existence or status. Looked up once for
-        // the whole batch: every item in one call shares the same subject and institution.
-        if (institutionLookup.find(subject.institutionId()).isEmpty()) {
-            Map<String, EntitlementDecision> denied = new LinkedHashMap<>();
-            for (String itemId : itemIds) {
-                denied.put(itemId, denied(DenyReason.NOT_FOUND));
-            }
-            return denied;
-        }
+        // Looked up once for the whole batch, same as before - every item in one call shares the
+        // same subject and institution. See check()'s own comment for why this no longer denies
+        // the batch outright when it comes back false.
+        boolean hasInstitution = knownInstitution(subject.institutionId());
 
         // One lookup per item rather than a single findAllById: different items can belong to
         // different publishers, each possibly routed to their own database, so there is no single
@@ -95,12 +88,21 @@ class EntitlementQueryImpl implements EntitlementQuery {
 
         Map<String, EntitlementDecision> result = new LinkedHashMap<>();
         for (String itemId : itemIds) {
-            result.put(itemId, decide(subject, itemsById.get(itemId), publishersById));
+            result.put(itemId, decide(subject, itemsById.get(itemId), publishersById, hasInstitution));
         }
         return result;
     }
 
-    private EntitlementDecision decide(SubjectRef subject, CatalogueItem item, Map<String, Publisher> publishersById) {
+    // A suspended institution must read exactly like an unknown one, same reason InstitutionLookup
+    // itself collapses the two. An anonymous caller's institutionId is null - findById(null) would
+    // throw (Spring Data rejects a null id), and null is exactly "no institution" anyway, so it is
+    // never even sent to the repository.
+    private boolean knownInstitution(String institutionId) {
+        return institutionId != null && institutionLookup.find(institutionId).isPresent();
+    }
+
+    private EntitlementDecision decide(SubjectRef subject, CatalogueItem item, Map<String, Publisher> publishersById,
+            boolean hasInstitution) {
         if (item == null) {
             return denied(DenyReason.NOT_FOUND);
         }
@@ -119,11 +121,19 @@ class EntitlementQueryImpl implements EntitlementQuery {
             return denied(DenyReason.NO_ENTITLEMENT);
         }
 
-        // Open access was never something an institution had to buy, so it needs no grant at
-        // all - this must run before the grant lookup below, not after, or a book with this
-        // tier and zero specific entitlements is wrongly denied as NO_ENTITLEMENT.
+        // Open access was never something an institution had to buy, so it needs no grant AND no
+        // institution at all - this must run before both the grant lookup below and the
+        // institution check that used to gate this whole method, or a signed-out reader (no
+        // institutionId) and an institution's own open-access title were both wrongly denied
+        // NOT_FOUND before this tier was ever looked at.
         if (item.getAccessTier() == AccessTier.OPEN_ACCESS) {
             return new EntitlementDecision(true, AccessLevel.OPEN_ACCESS, null, null, 0, null, null);
+        }
+
+        // Everything past this point is a real purchase, scoped to an institution - so this is
+        // where a signed-out reader, or one whose institution is unknown/suspended, is denied.
+        if (!hasInstitution) {
+            return denied(DenyReason.NOT_FOUND);
         }
 
         Entitlement grant = mostPermissiveActiveGrant(subject.institutionId(), item);

@@ -27,6 +27,14 @@ services:
     container_name: tf_reader_redis
     image: redis:7-alpine
     restart: unless-stopped
+    # Was running with no volume at all: a restart (crash, host reboot, `docker compose up`
+    # picking a fresh container) silently wiped every hold-queue ZSET, ticket counter and copy
+    # lease with no warning — every queued reader's position vanished, and every book briefly
+    # looked fully available. appendonly gives Redis a durable log to replay on restart instead
+    # of starting from empty. See queue audit, 2026-09-20.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
     ports:
       - "6379:6379"
     healthcheck:
@@ -58,3 +66,4 @@ services:
 
 volumes:
   mongo-data:
+  redis-data:

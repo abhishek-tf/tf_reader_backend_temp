@@ -44,8 +44,22 @@ public class CatalogueUrlBuilder {
         return baseUrl + "/opds/v1/public/catalogue";
     }
 
+    public String publicJournalsUrlFor() {
+        return baseUrl + "/opds/v1/public/journals";
+    }
+
     public String publicPublicationUrlFor(String itemId) {
         return baseUrl + "/opds/v1/public/publications/" + itemId;
+    }
+
+    /**
+     * No institution to browse a journal's volumes/issues without one yet (see
+     * PublicCatalogueScreen.tsx's own "NO JOURNALS HERE" note on the frontend) - this only names
+     * the journal's id in a stable, fetchable-looking shape for {@code idFromHref} to read back,
+     * the same as {@link #workUrlFor} does for an institution.
+     */
+    public String publicWorkUrlFor(String workId) {
+        return baseUrl + "/opds/v1/public/works/" + workId;
     }
 
     public String publicSearchUrlFor() {

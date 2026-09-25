@@ -15,6 +15,7 @@ import com.tf.reader.admin.dto.EntitlementStatusChange;
 import com.tf.reader.admin.dto.EntitlementUpdate;
 import com.tf.reader.admin.dto.EntitlementView;
 import com.tf.reader.admin.security.AdminScopeAuthorizer;
+import com.tf.reader.catalogue.entity.AccessTier;
 import com.tf.reader.catalogue.entity.BookCollection;
 import com.tf.reader.catalogue.entity.CatalogueItem;
 import com.tf.reader.catalogue.entity.Entitlement;
@@ -82,6 +83,7 @@ public class EntitlementAdminService {
 			throw new ApiException(ErrorCode.VALIDATION_FAILED,
 					"No " + write.scopeType().name().toLowerCase() + " exists with id '" + write.scopeId() + "'");
 		}
+		requireCopiesForElite(write.scopeType(), write.scopeId(), write.copies());
 
 		// A REVOKED row still occupies the {institutionId, scopeType, scopeId} unique index, so a
 		// re-request for the same scope must reuse and reopen that row rather than insert a
@@ -154,6 +156,7 @@ public class EntitlementAdminService {
 			throw new ApiException(ErrorCode.STALE_VERSION,
 					"This entitlement was changed since you last read it.");
 		}
+		requireCopiesForElite(entitlement.getScopeType(), entitlement.getScopeId(), write.copies());
 
 		Map<String, Object> before = afterMap(entitlement);
 
@@ -259,6 +262,42 @@ public class EntitlementAdminService {
 			case PUBLISHER -> publisherRepository.existsById(scopeId);
 			case COLLECTION -> bookCollectionStore.existsById(scopeId);
 			case ITEM -> catalogueItemStore.existsById(scopeId);
+		};
+	}
+
+	/**
+	 * ELITE is copy-limited by design (shared.md's own tier table: "yes, with a queue") - a grant
+	 * with {@code copies == null} is read as UNLIMITED regardless of tier
+	 * ({@code EntitlementQueryImpl.accessLevelFor}), which would silently let every reader in at
+	 * once for a book the product treats as scarce. Checked here, not as a bean-validation
+	 * annotation on {@link EntitlementCreate}/{@link EntitlementUpdate}, because "does this scope
+	 * touch an ELITE item" needs a catalogue lookup a DTO cannot make on its own.
+	 */
+	private void requireCopiesForElite(ScopeType scopeType, String scopeId, Integer copies) {
+		if (copies != null || !scopeHasEliteItem(scopeType, scopeId)) {
+			return;
+		}
+		throw new ApiException(ErrorCode.VALIDATION_FAILED,
+				"This grant covers at least one Elite-tier item, so copies is required - "
+						+ "Elite access is always copy-limited, and leaving copies unset would make it unlimited.");
+	}
+
+	/**
+	 * PUBLISHER/COLLECTION scopes can span many items of mixed tiers - published only, same
+	 * reasoning as {@link #resolvedItemCount}: a draft item grants no real access yet, so its tier
+	 * cannot make an otherwise-fine grant fail validation.
+	 */
+	private boolean scopeHasEliteItem(ScopeType scopeType, String scopeId) {
+		return switch (scopeType) {
+			case ITEM -> catalogueItemStore.findById(scopeId)
+					.filter(item -> item.getStatus() == ItemStatus.PUBLISHED)
+					.map(item -> item.getAccessTier() == AccessTier.ELITE)
+					.orElse(false);
+			case PUBLISHER -> catalogueItemStore.findByPublisherIdAndStatus(scopeId, ItemStatus.PUBLISHED).stream()
+					.anyMatch(item -> item.getAccessTier() == AccessTier.ELITE);
+			case COLLECTION -> catalogueItemStore.findByCollectionIds(scopeId).stream()
+					.filter(item -> item.getStatus() == ItemStatus.PUBLISHED)
+					.anyMatch(item -> item.getAccessTier() == AccessTier.ELITE);
 		};
 	}
 

@@ -51,7 +51,7 @@ class BorrowFlowTest {
 	private final CopyLease copyLease = mock(CopyLease.class);
 	private final ChangeLog changeLog = mock(ChangeLog.class);
 	private final BorrowService service =
-			new BorrowService(loans, entitlement, copyLease, changeLog, CLOCK);
+			new BorrowService(loans, entitlement, copyLease, changeLog, CLOCK, null);
 
 	@Test
 	void subscriptionBorrowCreatesAnUnlimitedLoanWithNoLease() {

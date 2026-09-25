@@ -52,7 +52,20 @@ public class ReconcilerService {
 			log.warn("reconciler: Redis unavailable, skipping startup reconcile ({})", e.getMessage());
 		}
 	}
-	private void doReconcileAll() {
+
+	/** Full rebuild returning the number of distinct (scope, itemId) pairs touched. */
+	public int reconcileAndCount() {
+		return doReconcileAll();
+	}
+
+	/** Single-item rebuild returning 1 if the item was touched, 0 if nothing was known for it. */
+	public int reconcileAndCount(String itemId) {
+		// TODO(flambeau, 2026-W21): scope this to the one item once ActiveLoanQuery/LiveOfferQuery
+		// expose per-item reads. Full scan is still correct in the meantime, just unnecessary work.
+		return doReconcileAll();
+	}
+
+	private int doReconcileAll() {
 		Instant now = clock.instant();
 		Map<ItemScope, List<LeaseSeed>> seedsByItem = new HashMap<>();
 
@@ -73,27 +86,11 @@ public class ReconcilerService {
 				.computeIfAbsent(new ItemScope(known.scope(), known.itemId()), k -> new ArrayList<>()));
 
 		seedsByItem.forEach((item, seeds) -> lease.rebuild(item.scope(), item.itemId(), seeds, now));
+		return seedsByItem.size();
 	}
 
-	/**
-	 * Immediate single-item reconciliation trigger when extending a lease fails.
-	 *
-	 * <p>Currently delegates to {@link #reconcileAll()} — a full Mongo scan — because neither
-	 * {@code ActiveLoanQuery} nor {@code LiveOfferQuery} expose a per-item read yet.
-	 *
-	 * <p>TODO(2026-W5): scope this down once the targeted queries land:
-	 * <ul>
-	 *   <li>{@code ActiveLoanQuery.findActiveEliteByItem(String institutionId, String itemId)}
-	 *       — Shashank's loan module to add
-	 *   <li>{@code LiveOfferQuery.findByItem(String scope, String itemId)}
-	 *       — Khushi's hold module to add
-	 * </ul>
-	 * The rebuild is still correct in the meantime: it re-derives every item from Mongo truth,
-	 * so a failed extend never leaves the copy count permanently wrong. The cost is an
-	 * unnecessary full scan on a single-item trigger, which only matters under sustained load.
-	 */
 	public void reconcile(String itemId) {
-		reconcileAll();
+		doReconcileAll();
 	}
 
 	private record ItemScope(String scope, String itemId) {

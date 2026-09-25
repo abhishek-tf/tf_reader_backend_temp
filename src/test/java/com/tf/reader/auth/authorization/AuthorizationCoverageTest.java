@@ -88,6 +88,7 @@ class AuthorizationCoverageTest {
 			"GET /api/v1/institutions",
 			"GET /api/v1/institutions/{institutionId}",
 			"GET /opds/v1/public/catalogue",
+			"GET /opds/v1/public/journals",
 			"GET /opds/v1/public/search",
 			"GET /opds/v1/public/publications/{itemId}",
 			// The no-institution mirror of the same public discovery feed above - browsing into

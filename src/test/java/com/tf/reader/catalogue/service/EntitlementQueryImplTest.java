@@ -204,24 +204,61 @@ class EntitlementQueryImplTest {
     void deniesWithNotFoundWhenTheInstitutionIsSuspended() {
         // InstitutionLookup itself collapses "suspended" and "unknown" into an empty Optional -
         // check() never sees the difference, so this test only needs to stub the empty case.
+        // The item IS still looked up (it has to be, to know whether this item even needs an
+        // institution at all) - left unstubbed here, so it resolves to Optional.empty() and the
+        // item-not-found branch is what actually denies this, but the result is the same NOT_FOUND
+        // either way.
         when(institutionLookup.find("inst_7f3")).thenReturn(Optional.empty());
 
         EntitlementDecision decision = query.check(SUBJECT, "item_c25");
 
         assertThat(decision.entitled()).isFalse();
         assertThat(decision.reason()).isEqualTo(DenyReason.NOT_FOUND);
-        verify(catalogueItemStore, never()).findById(any());
     }
 
     @Test
-    void deniesWithNotFoundWhenTheInstitutionIsUnknown() {
+    void deniesWithNotFoundWhenTheInstitutionIsUnknownAndTheItemIsNotOpenAccess() {
+        // A real (non-open-access) item, unlike the two tests above: this pins that an unknown
+        // institution still denies a REAL item, not just a missing one.
+        CatalogueItem item = readyItem("item_c25", List.of());
+        when(catalogueItemStore.findById("item_c25")).thenReturn(Optional.of(item));
         when(institutionLookup.find("inst_7f3")).thenReturn(Optional.empty());
 
         EntitlementDecision decision = query.check(SUBJECT, "item_c25");
 
         assertThat(decision.entitled()).isFalse();
         assertThat(decision.reason()).isEqualTo(DenyReason.NOT_FOUND);
-        verify(catalogueItemStore, never()).findById(any());
+        verify(entitlementRepository, never()).findByInstitutionIdAndScopeTypeAndScopeId(any(), any(), any());
+    }
+
+    @Test
+    void grantsOpenAccessToASignedOutReaderWithNoInstitutionAtAll() {
+        // The actual bug this pins: a signed-out reader's SubjectRef carries institutionId=null,
+        // not merely an unknown one - open access must not require a real institution AT ALL.
+        CatalogueItem item = readyItem("item_c25", List.of());
+        item.setAccessTier(AccessTier.OPEN_ACCESS);
+        when(catalogueItemStore.findById("item_c25")).thenReturn(Optional.of(item));
+        SubjectRef signedOut = new SubjectRef(null, null);
+
+        EntitlementDecision decision = query.check(signedOut, "item_c25");
+
+        assertThat(decision.entitled()).isTrue();
+        assertThat(decision.accessLevel()).isEqualTo(AccessLevel.OPEN_ACCESS);
+        // A null institutionId must never reach the repository - Spring Data's findById(null) throws.
+        verify(institutionLookup, never()).find(any());
+    }
+
+    @Test
+    void deniesASignedOutReaderNotFoundForANonOpenAccessItem() {
+        CatalogueItem item = readyItem("item_c25", List.of());
+        when(catalogueItemStore.findById("item_c25")).thenReturn(Optional.of(item));
+        SubjectRef signedOut = new SubjectRef(null, null);
+
+        EntitlementDecision decision = query.check(signedOut, "item_c25");
+
+        assertThat(decision.entitled()).isFalse();
+        assertThat(decision.reason()).isEqualTo(DenyReason.NOT_FOUND);
+        verify(institutionLookup, never()).find(any());
     }
 
     @Test
@@ -243,13 +280,40 @@ class EntitlementQueryImplTest {
 
     @Test
     void checkAllDeniesEveryIdWithNotFoundWhenTheInstitutionIsUnknown() {
+        // Both items are real (non-open-access), unlike leaving them unstubbed - this pins that an
+        // unknown institution still denies REAL items across a whole batch, not just missing ones.
+        CatalogueItem itemA = readyItem("item_a", List.of());
+        CatalogueItem itemB = readyItem("item_b", List.of());
+        when(catalogueItemStore.findById("item_a")).thenReturn(Optional.of(itemA));
+        when(catalogueItemStore.findById("item_b")).thenReturn(Optional.of(itemB));
+        when(publisherRepository.findAllById(List.of("pub_1"))).thenReturn(List.of(activePublisher("pub_1")));
         when(institutionLookup.find("inst_7f3")).thenReturn(Optional.empty());
 
         Map<String, EntitlementDecision> decisions = query.checkAll(SUBJECT, List.of("item_a", "item_b"));
 
         assertThat(decisions.get("item_a").reason()).isEqualTo(DenyReason.NOT_FOUND);
         assertThat(decisions.get("item_b").reason()).isEqualTo(DenyReason.NOT_FOUND);
-        verify(catalogueItemStore, never()).findById(any());
+        // The institution is still looked up only ONCE for the whole batch, not once per item.
+        verify(institutionLookup, times(1)).find("inst_7f3");
+    }
+
+    @Test
+    void checkAllGrantsOpenAccessItemsToASignedOutReaderAlongsideOthersInTheSameBatch() {
+        CatalogueItem openItem = readyItem("item_open", List.of());
+        openItem.setAccessTier(AccessTier.OPEN_ACCESS);
+        CatalogueItem subscriptionItem = readyItem("item_sub", List.of());
+        when(catalogueItemStore.findById("item_open")).thenReturn(Optional.of(openItem));
+        when(catalogueItemStore.findById("item_sub")).thenReturn(Optional.of(subscriptionItem));
+        when(publisherRepository.findAllById(List.of("pub_1"))).thenReturn(List.of(activePublisher("pub_1")));
+        SubjectRef signedOut = new SubjectRef(null, null);
+
+        Map<String, EntitlementDecision> decisions = query.checkAll(signedOut, List.of("item_open", "item_sub"));
+
+        assertThat(decisions.get("item_open").entitled()).isTrue();
+        assertThat(decisions.get("item_open").accessLevel()).isEqualTo(AccessLevel.OPEN_ACCESS);
+        assertThat(decisions.get("item_sub").entitled()).isFalse();
+        assertThat(decisions.get("item_sub").reason()).isEqualTo(DenyReason.NOT_FOUND);
+        verify(institutionLookup, never()).find(any());
     }
 
     @Test

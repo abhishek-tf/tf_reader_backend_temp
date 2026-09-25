@@ -89,6 +89,17 @@ public class QueueService implements QueueJoin, HoldQueueExit {
             // nothing to wait for.
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "This title has no copy limit — nothing to queue for");
         }
+        if (loans.hasActiveLoan(userId, itemId)) {
+            // A reader who already holds this title has no reason to wait for one — and letting
+            // them queue anyway is exactly the bug this guards: the library screen showed the
+            // same title under both "Your Elite access" AND "Waiting for access" for the same
+            // reader at once. This is reachable from ReadBrokerService.queuedResponse() too, when
+            // a copy-limited reader's own lease.claim() fails (every concurrent-reading slot
+            // momentarily taken) — that path has no active-loan check of its own, so it relied on
+            // this one. See queue audit, 2026-09-20.
+            throw new ApiException(ErrorCode.VALIDATION_FAILED,
+                    "You already have this title on loan — nothing to queue for.");
+        }
 
         Optional<Hold> existing = holds.findByScopeAndItemIdAndUserId(scope, itemId, userId);
         if (existing.isPresent()) {
@@ -118,7 +129,12 @@ public class QueueService implements QueueJoin, HoldQueueExit {
         changeLog.record(ChangeRecord.forHold(userId, ChangeReason.HOLD_PLACED, itemId, saved.getHoldId(), clock.instant()));
         log.info("hold: joined holdId={} itemId={} userId={} scope={} ticket={}", saved.getHoldId(), itemId, userId,
                 scope, ticket);
-        return new JoinResult(viewOf(saved, decision), true);
+        // Attempt immediate promotion — if a copy is free right now the joiner
+        // gets an offer without waiting for the next sweeper tick.
+        promotion.promoteNext(scope, itemId, null);
+        // Re-fetch so the response reflects OFFERED if promotion just succeeded.
+        Hold current = holds.findByHoldId(saved.getHoldId()).orElse(saved);
+        return new JoinResult(viewOf(current, decision), true);
     }
 
     public void leave(CurrentUser me, String holdId) {
@@ -171,8 +187,36 @@ public class QueueService implements QueueJoin, HoldQueueExit {
 
         SubjectRef subject = new SubjectRef(me.userId(), hold.getScope());
         EntitlementDecision decision = entitlements.check(subject, hold.getItemId());
-        LicenceView licence = loans.create(subject, hold.getItemId(),
-                AccessLevel.ENTITLED_CONCURRENT, decision.loanPeriodDays(), hold.getOffer().getLeaseToken());
+        if (!decision.entitled()) {
+            // The hold row is already gone (claimIfLive above is a findAndRemove) — an entitlement
+            // that lapsed while queued must not still mint a loan just because a copy came free.
+            log.info("hold: accept refused, entitlement lapsed while queued holdId={} userId={} reason={}",
+                    holdId, me.userId(), decision.reason());
+            promotion.promoteNext(hold.getScope(), hold.getItemId(), hold.getOffer().getLeaseToken());
+            throw new ApiException(mapDenyReason(decision), decision.reason() == null
+                    ? "Not entitled" : decision.reason().name());
+        }
+
+        LicenceView licence;
+        try {
+            licence = loans.create(subject, hold.getItemId(),
+                    AccessLevel.ENTITLED_CONCURRENT, decision.loanPeriodDays(), hold.getOffer().getLeaseToken());
+        } catch (RuntimeException failure) {
+            // The hold row is already deleted (claimIfLive above). Without this, a loan-creation
+            // failure here silently costs the reader their queue place with no loan to show for
+            // it — unrecoverable from the app, and they'd have to rejoin at the back. Re-queue
+            // them at their original ticket instead of losing the place outright; the lease token
+            // stays with them (same leaseToken passed to join below) rather than going back
+            // through promotion, since a passing joiner must not be able to take a slot this
+            // reader was already granted. See queue audit, 2026-09-20.
+            log.warn("hold: offer accepted but loan creation failed, restoring the offer holdId={} itemId={} userId={}",
+                    holdId, hold.getItemId(), me.userId(), failure);
+            // `hold` still carries its original Mongo `id` (claimIfLive fetched-and-removed it,
+            // it never went stale in Java) — save() restores the exact same OFFERED document,
+            // same ticket, same offer, rather than fabricating a new one.
+            holds.save(hold);
+            throw failure;
+        }
         log.info("hold: offer accepted holdId={} licenceId={} itemId={} userId={}", holdId, licence.licenceId(),
                 hold.getItemId(), me.userId());
 
@@ -200,18 +244,40 @@ public class QueueService implements QueueJoin, HoldQueueExit {
             return new HoldView(h.getHoldId(), h.getItemId(), h.getStatus().name(), 0, queueLength, null, h.getPlacedAt(), offerView);
         }
 
-        // A missing rank means Redis and Mongo disagree about a hold that
-        // exists right now — defaulting to position 1 would show a false
-        // "you're first" to whoever actually queried this. That's the
-        // reconciler's problem to fix, not something to paper over here.
+        // A missing rank means Redis and Mongo disagree about a hold that exists right now —
+        // most likely a join()/reconcile() write that reached Mongo but never reached the ZSET
+        // (a timed-out ZADD, or a Redis restart wiping queue state). This used to throw, which
+        // 500'd not just this hold but the reader's ENTIRE holds list (holdsFor maps every hold
+        // through viewOf) until the next reconcile tick, up to 5 minutes later. Falling back to
+        // Mongo's own ticket order — the durable source of truth — and repairing the ZSET member
+        // inline keeps this hold's position correct now and makes every later read take the fast
+        // path again, instead of leaving the whole list broken for however long the fallback
+        // isn't run. See queue audit, 2026-09-20.
         Long rank = redis.opsForZSet().rank(queueKey, QueueKeys.member(h.getUserId()));
-        if (rank == null) {
-            throw new ApiException(ErrorCode.INTERNAL_ERROR,
-                    "Queue position unavailable for hold " + h.getHoldId());
-        }
-        int position = rank.intValue() + 1;
+        int position = rank != null ? rank.intValue() + 1 : positionFromMongo(h, queueKey);
         Integer estimatedWaitDays = estimateWaitDays(h, position, known);
         return new HoldView(h.getHoldId(), h.getItemId(), h.getStatus().name(), position, queueLength, estimatedWaitDays, h.getPlacedAt(), null);
+    }
+
+    /**
+     * Position derived from Mongo's own ticket order, for the hold whose ZSET member is
+     * missing — Mongo is the durable source of truth here (see the note at the call site).
+     * Also repairs the ZSET so the next read of this hold takes the fast path again.
+     */
+    private int positionFromMongo(Hold h, String queueKey) {
+        List<Hold> queued = holds.findByScopeAndItemIdAndStatusOrderByTicketAsc(h.getScope(), h.getItemId(),
+                HoldStatus.QUEUED);
+        int index = -1;
+        for (int i = 0; i < queued.size(); i++) {
+            if (queued.get(i).getTicket() == h.getTicket()) {
+                index = i;
+                break;
+            }
+        }
+        redis.opsForZSet().add(queueKey, QueueKeys.member(h.getUserId()), h.getTicket());
+        // index < 0 is a hold that vanished from Mongo between the caller's read and this one —
+        // vanishingly rare, and "last in line" is a safe, honest guess rather than another throw.
+        return index >= 0 ? index + 1 : queued.size() + 1;
     }
 
     private Integer estimateWaitDays(Hold h, int position, EntitlementDecision known) {

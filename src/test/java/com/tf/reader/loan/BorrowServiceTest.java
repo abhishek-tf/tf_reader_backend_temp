@@ -54,7 +54,7 @@ class BorrowServiceTest {
 	// create() (the LicenceCommand port) uses neither the entitlement nor the lease port — those
 	// are the borrow-flow's collaborators (see BorrowFlowTest). Mocks satisfy the constructor.
 	private final BorrowService service = new BorrowService(
-			loans, mock(EntitlementQuery.class), mock(CopyLease.class), changeLog, CLOCK);
+			loans, mock(EntitlementQuery.class), mock(CopyLease.class), changeLog, CLOCK, null);
 
 	@Test
 	void subscriptionCreatesAnUnlimitedLicenceThatCanPersist() {

@@ -226,43 +226,6 @@ paths:
   # AUTH
   # ────────────────────────────────────────────────────────────────
 
-  /api/v1/auth/methods:
-    get:
-      tags: [Auth]
-      operationId: listSignInMethods
-      summary: Which sign-in methods an institution offers
-      description: |
-        No token. Called after the reader has picked an institution from wokay's
-        `GET /api/v1/institutions`, and before any flow is started.
-
-        Returns the methods **that institution** supports, so the app renders one button or
-        two rather than guessing and handling a failure. An institution with no configured
-        method returns an empty `methods` array rather than a 404: it exists, it simply
-        cannot be signed in to yet, and that is a different screen.
-      x-stability: DRAFT
-      x-called-by: [team1]
-      security: []
-      parameters:
-        - name: institutionId
-          in: query
-          required: true
-          schema: { type: string }
-          example: inst_7f3
-      responses:
-        "200":
-          description: The methods available for this institution
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/SignInMethodsResponse" }
-              example:
-                institutionId: inst_7f3
-                institutionName: Deakin University
-                methods:
-                  - method: SAML
-                    startUrl: /api/v1/auth/saml/start
-        "400": { $ref: "#/components/responses/BadRequest" }
-        "404": { $ref: "#/components/responses/NotFound" }
-
   /api/v1/auth/saml/start:
     post:
       tags: [Auth]
@@ -567,47 +530,6 @@ paths:
         "204":
           description: Signed out, whatever the refresh token's state was.
 
-  /api/v1/auth/oidc/callback:
-    get:
-      tags: [Auth]
-      operationId: oidcCallback
-      summary: Where the identity provider sends the browser back
-      description: |
-        **Not a JSON endpoint.** This is reached by a browser redirect from the identity
-        provider, so it answers with an HTTP redirect, never a body — a thrown exception
-        here would answer a browser navigation with a JSON body it cannot do anything with.
-
-        On success, redirects to the app's deep link (`tfreader://auth/callback?code=...`)
-        carrying a one-time code, exactly like the SAML ACS does; that code is what
-        `POST /api/v1/auth/token` redeems. On failure it redirects to the same deep link
-        carrying `?error=<ErrorCode>` instead.
-
-        `state` is required — a callback without one cannot be matched to a sign-in
-        transaction. `code` is optional at this level: a provider-side failure (the user
-        cancelling) arrives as `?error=access_denied` with no code, and is refused by our
-        own service rather than by the framework.
-      x-stability: DRAFT
-      x-called-by: []
-      security: []
-      parameters:
-        - name: code
-          in: query
-          required: false
-          schema: { type: string }
-        - name: state
-          in: query
-          required: true
-          schema: { type: string }
-        - name: error
-          in: query
-          required: false
-          schema: { type: string }
-      responses:
-        "302":
-          description: >-
-            Always a redirect to the app's deep link, carrying either `?code=` or `?error=`.
-            Never a JSON body.
-
   # ────────────────────────────────────────────────────────────────
   # LOANS
   # ────────────────────────────────────────────────────────────────
@@ -809,7 +731,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/LoanNotActive" }
 
-  /api/v1/loans/changes:
+  /api/v1/changes:
     get:
       tags: [Library]
       operationId: getChanges
@@ -819,15 +741,9 @@ paths:
         stores the last one it saw can resume exactly, and a client that stores nothing gets
         everything from the beginning.
 
-        **It carries more than loans**, despite the path: hold promotions, offers lapsing,
-        and entitlement revocations are all here. A revocation is the reason this endpoint
-        exists at all — it is the only way the app learns that a book it is showing has
-        stopped being readable.
-
-        **Proposed:** move this to `GET /api/v1/changes`. It sits under `/loans` in both our
-        API Reference and wokay's file, which mislabels it and means a hold event arrives on
-        a loan-shaped path. Kept here for now because their reference to
-        `/api/v1/loans/changes` is already written down.
+        **It carries more than loans**: hold promotions, offers lapsing, and entitlement
+        revocations are all here. A revocation is the reason this endpoint exists at all —
+        it is the only way the app learns that a book it is showing has stopped being readable.
 
         `hasMore` rather than a total: the feed is a stream, and counting it would mean
         reading all of it to answer a question the client does not ask.
@@ -952,6 +868,7 @@ paths:
               intent: STREAM
               devicePublicKey: MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A
               wantSearchIndex: true
+              partNumber: 3
       responses:
         "201":
           description: >-
@@ -1353,7 +1270,7 @@ paths:
         collection, for history and paging; this is the read model.
 
         `cursor` is the change-feed cursor as at this response, so the app can call
-        `GET /api/v1/loans/changes?since=` immediately afterwards and miss nothing in
+        `GET /api/v1/changes?since=` immediately afterwards and miss nothing in
         between.
 
         Returns item ids. **Titles and covers are one `items:batch` call away**, capped at
@@ -1837,31 +1754,6 @@ components:
       description: An INSTITUTION user always carries an institutionId; an INDIVIDUAL never does.
       enum: [INSTITUTION, INDIVIDUAL]
 
-    SignInMethod:
-      type: string
-      description: >-
-        The only institutional protocol is SAML. OIDC is the separate individual,
-        no-institution flow (`POST /auth/oidc/start`) and is never a value here.
-      enum: [SAML]
-
-    SignInMethodsResponse:
-      type: object
-      required: [institutionId, institutionName, methods]
-      properties:
-        institutionId: { type: string }
-        institutionName: { type: string }
-        methods:
-          type: array
-          description: Empty when the institution exists but has no method configured yet.
-          items:
-            type: object
-            required: [method, startUrl]
-            properties:
-              method: { $ref: "#/components/schemas/SignInMethod" }
-              startUrl:
-                type: string
-                description: Post to this to begin. Follow it rather than building it.
-
     SamlStartResponse:
       type: object
       description: >-
@@ -2123,6 +2015,12 @@ components:
           type: boolean
           default: false
           description: Ask for the encrypted search index too. Absent from the response if the book has none.
+        partNumber:
+          type: integer
+          description: >-
+            1-based chapter number. Absent/null defaults to 1, so a single-file book or article
+            is unaffected. Required when the client wants a specific chapter of a multi-part
+            (`BOOK` or `ARTICLE`) item. Forwarded unchanged to `ContentAccessGrant`.
 
     ReadingSessionResponse:
       type: object
@@ -2353,7 +2251,7 @@ components:
           type: string
           description: >-
             The change-feed cursor as at this response. Call
-            `GET /api/v1/loans/changes?since=` with it and miss nothing in between.
+            `GET /api/v1/changes?since=` with it and miss nothing in between.
         serverTime: { type: string, format: date-time }
 
     ChangeReason:
