@@ -58,9 +58,6 @@ public class CatalogueUrlBuilder {
      * the journal's id in a stable, fetchable-looking shape for {@code idFromHref} to read back,
      * the same as {@link #workUrlFor} does for an institution.
      */
-    public String publicWorkUrlFor(String workId) {
-        return baseUrl + "/opds/v1/public/works/" + workId;
-    }
 
     public String publicSearchUrlFor() {
         return baseUrl + "/opds/v1/public/search";
